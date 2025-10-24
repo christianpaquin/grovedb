@@ -129,6 +129,40 @@ pub fn node_hash(
 }
 
 #[cfg(any(feature = "minimal", feature = "verify"))]
+/// Hashes a list-mode node including its subtree size and parent pointer to bind positional metadata.
+pub fn node_hash_list_mode(
+    kv: &CryptoHash,
+    left: &CryptoHash,
+    right: &CryptoHash,
+    subtree_size: u64,
+    parent_key: &Option<Vec<u8>>,
+) -> CostContext<CryptoHash> {
+    // Domain separation: prepend a distinguishing byte so a 24-byte concat can't
+    // collide structurally with regular node hashing.
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&[0xA5]); // arbitrary domain separator for list_mode variant
+    hasher.update(kv);
+    hasher.update(left);
+    hasher.update(right);
+    hasher.update(&subtree_size.to_le_bytes());
+    // Hash parent_key: 0x00 for None, 0x01 + key bytes for Some
+    if let Some(ref pk) = parent_key {
+        hasher.update(&[0x01]);
+        hasher.update(pk);
+    } else {
+        hasher.update(&[0x00]);
+    }
+    let res = hasher.finalize();
+    let mut hash: CryptoHash = Default::default();
+    hash.copy_from_slice(res.as_bytes());
+    // treat as 2 hash node calls (similar to regular node); metadata bytes negligible
+    hash.wrap_with_cost(OperationCost {
+        hash_node_calls: 2,
+        ..Default::default()
+    })
+}
+
+#[cfg(any(feature = "minimal", feature = "verify"))]
 /// Combines two hash values into one
 pub fn combine_hash(hash_one: &CryptoHash, hash_two: &CryptoHash) -> CostContext<CryptoHash> {
     let mut hasher = blake3::Hasher::new();

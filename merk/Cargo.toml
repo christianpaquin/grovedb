@@ -30,6 +30,7 @@ blake3 = { version = "1.8.1", optional = true }
 ed = { version = "0.2.2", optional = true }
 num_cpus = { version = "1.16.0", optional = true }
 colored = { version = "3.0.0", optional = true }
+uuid = { version = "1.10.0", features = ["v4"], optional = true }
 
 [features]
 default = ["full"]
@@ -52,6 +53,12 @@ verify = [
     "blake3"
 ]
 grovedbg = ["full"]
+
+# Experimental positional list mode (AVL order-statistic operations via subtree sizes)
+# Not enabled by default. Keys are random UUIDs and have no BST ordering semantics.
+# "ordered_list_keys" is an extension gating key-rank APIs; currently placeholders.
+list_mode = ["minimal", "uuid"]
+ordered_list_keys = ["list_mode"]
 
 [dev-dependencies]
 tempfile = "3.10.1"

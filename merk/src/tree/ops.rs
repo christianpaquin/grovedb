@@ -928,7 +928,7 @@ where
         );
 
         // attach grandchild to self
-        tree.attach(left, maybe_grandchild)
+        let rotated = tree.attach(left, maybe_grandchild)
             .maybe_balance(value_defined_cost_fn, grove_version)
             .flat_map_ok(|tree| {
                 // attach self to child, return child
@@ -936,7 +936,19 @@ where
                     .attach(!left, Some(tree))
                     .maybe_balance(value_defined_cost_fn, grove_version)
             })
-            .add_cost(cost)
+            .map_ok(|walker| {
+                #[cfg(feature = "list_mode")]
+                if walker.tree().list_mode {
+                    // Recompute subtree sizes by cloning, updating, and re-wrapping
+                    let mut cloned = walker.tree().clone();
+                    cloned.recompute_subtree_sizes_recursive();
+                    let source_clone = walker.clone_source();
+                    return Walker::new(cloned, source_clone);
+                }
+                walker
+            });
+
+        rotated.add_cost(cost)
     }
 
     /// Removes the root node from the tree. Rearranges and re-balances
