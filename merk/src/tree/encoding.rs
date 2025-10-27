@@ -139,9 +139,27 @@ impl TreeNode {
     pub fn value_encoding_length_with_parent_to_child_reference(&self) -> u32 {
         // in the case of a grovedb tree the value cost is fixed
         if let Some(value_cost) = &self.inner.kv.value_defined_cost {
-            self.inner.kv.predefined_value_byte_cost_size(value_cost)
+            let base_cost = self.inner.kv.predefined_value_byte_cost_size(value_cost);
+            #[cfg(feature = "list_mode")]
+            if self.list_mode {
+                // Add list_mode encoding overhead:
+                // 1 byte (sentinel) + 8 bytes (subtree_size) + 1 byte (parent_key tag)
+                // + 0 or 16 bytes (parent_key if present)
+                let parent_overhead = if self.parent_key.is_some() { 16 } else { 0 };
+                return base_cost + 1 + 8 + 1 + parent_overhead;
+            }
+            base_cost
         } else {
-            self.inner.kv.value_byte_cost_size()
+            let base_cost = self.inner.kv.value_byte_cost_size();
+            #[cfg(feature = "list_mode")]
+            if self.list_mode {
+                // Add list_mode encoding overhead:
+                // 1 byte (sentinel) + 8 bytes (subtree_size) + 1 byte (parent_key tag)
+                // + 0 or 16 bytes (parent_key if present)
+                let parent_overhead = if self.parent_key.is_some() { 16 } else { 0 };
+                return base_cost + 1 + 8 + 1 + parent_overhead;
+            }
+            base_cost
         }
     }
 

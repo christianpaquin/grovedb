@@ -17,6 +17,8 @@ pub enum TreeType {
     BigSumTree = 2,
     CountTree = 3,
     CountSumTree = 4,
+    #[cfg(feature = "list_mode")]
+    ListTree = 5,  // For collaborative editing with positional operations
 }
 
 impl TryFrom<u8> for TreeType {
@@ -29,7 +31,12 @@ impl TryFrom<u8> for TreeType {
             2 => Ok(TreeType::BigSumTree),
             3 => Ok(TreeType::CountTree),
             4 => Ok(TreeType::CountSumTree),
-            n => Err(Error::UnknownTreeType(format!("got {}, max is 4", n))), // Error handling
+            #[cfg(feature = "list_mode")]
+            5 => Ok(TreeType::ListTree),
+            #[cfg(feature = "list_mode")]
+            n => Err(Error::UnknownTreeType(format!("got {}, max is 5", n))),
+            #[cfg(not(feature = "list_mode"))]
+            n => Err(Error::UnknownTreeType(format!("got {}, max is 4", n))),
         }
     }
 }
@@ -42,6 +49,8 @@ impl fmt::Display for TreeType {
             TreeType::BigSumTree => "Big Sum Tree",
             TreeType::CountTree => "Count Tree",
             TreeType::CountSumTree => "Count Sum Tree",
+            #[cfg(feature = "list_mode")]
+            TreeType::ListTree => "List Tree",
         };
         write!(f, "{}", s)
     }
@@ -55,6 +64,8 @@ impl TreeType {
             TreeType::BigSumTree => true,
             TreeType::CountTree => false,
             TreeType::CountSumTree => true,
+            #[cfg(feature = "list_mode")]
+            TreeType::ListTree => false,
         }
     }
 
@@ -66,6 +77,8 @@ impl TreeType {
             TreeType::BigSumTree => NodeType::BigSumNode,
             TreeType::CountTree => NodeType::CountNode,
             TreeType::CountSumTree => NodeType::CountSumNode,
+            #[cfg(feature = "list_mode")]
+            TreeType::ListTree => NodeType::NormalNode,  // List trees use normal nodes with list_mode flag
         }
     }
 
@@ -76,6 +89,8 @@ impl TreeType {
             TreeType::BigSumTree => TreeFeatureType::BigSummedMerkNode(0),
             TreeType::CountTree => TreeFeatureType::CountedMerkNode(0),
             TreeType::CountSumTree => TreeFeatureType::CountedSummedMerkNode(0, 0),
+            #[cfg(feature = "list_mode")]
+            TreeType::ListTree => TreeFeatureType::BasicMerkNode,
         }
     }
 }

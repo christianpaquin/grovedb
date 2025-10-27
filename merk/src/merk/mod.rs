@@ -37,6 +37,8 @@ pub mod apply;
 pub mod clear;
 pub mod committer;
 pub mod get;
+#[cfg(all(feature = "full", feature = "list_mode"))]
+pub mod list_ops;
 pub mod open;
 pub mod prove;
 pub mod restore;
@@ -769,6 +771,89 @@ where
             grove_version,
         );
     }
+}
+
+/// Recursively loads all Link::Reference children of a tree from storage.
+/// This converts a lazy-loaded tree (with Reference links) into a fully
+/// materialized tree (with Loaded links), enabling operations that require
+/// tree navigation and rotations.
+///
+/// # Phase 5C Implementation
+/// This function is critical for operations on reopened trees. After
+/// `Merk::open_base()`, only the root is loaded and children are Link::Reference.
+/// This function recursively fetches all children to enable operations like
+/// insert_at_position and delete_at_position.
+#[cfg(all(feature = "full", feature = "list_mode"))]
+fn load_tree_recursively<'db>(
+    mut tree: TreeNode,
+    db: &impl StorageContext<'db>,
+    grove_version: &GroveVersion,
+) -> CostResult<TreeNode, Error> {
+    let mut cost = OperationCost::default();
+
+    // Load left child if it's a reference
+    if let Some(link) = tree.link(true) {
+        if let Link::Reference { hash, child_heights, key, aggregate_data } = link {
+            let key = key.clone();
+            let hash = *hash;
+            let child_heights = *child_heights;
+            let aggregate_data = *aggregate_data;
+            
+            let child_tree_result = fetch_node(db, &key, None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version);
+            let child_tree = match child_tree_result {
+                Ok(tree_opt) => tree_opt,
+                Err(e) => return Err(e).wrap_with_cost(cost),
+            };
+            
+            if let Some(child) = child_tree {
+                // Recursively load the child's children
+                let loaded_child = cost_return_on_error!(
+                    &mut cost,
+                    load_tree_recursively(child, db, grove_version)
+                );
+                // Replace the reference with the loaded tree
+                *tree.slot_mut(true) = Some(Link::Loaded {
+                    hash,
+                    child_heights,
+                    tree: loaded_child,
+                    aggregate_data,
+                });
+            }
+        }
+    }
+
+    // Load right child if it's a reference
+    if let Some(link) = tree.link(false) {
+        if let Link::Reference { hash, child_heights, key, aggregate_data } = link {
+            let key = key.clone();
+            let hash = *hash;
+            let child_heights = *child_heights;
+            let aggregate_data = *aggregate_data;
+            
+            let child_tree_result = fetch_node(db, &key, None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version);
+            let child_tree = match child_tree_result {
+                Ok(tree_opt) => tree_opt,
+                Err(e) => return Err(e).wrap_with_cost(cost),
+            };
+            
+            if let Some(child) = child_tree {
+                // Recursively load the child's children
+                let loaded_child = cost_return_on_error!(
+                    &mut cost,
+                    load_tree_recursively(child, db, grove_version)
+                );
+                // Replace the reference with the loaded tree
+                *tree.slot_mut(false) = Some(Link::Loaded {
+                    hash,
+                    child_heights,
+                    tree: loaded_child,
+                    aggregate_data,
+                });
+            }
+        }
+    }
+
+    Ok(tree).wrap_with_cost(cost)
 }
 
 fn fetch_node<'db>(

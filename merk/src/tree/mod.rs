@@ -18,6 +18,8 @@ mod just_in_time_value_update;
 pub mod kv;
 #[cfg(feature = "minimal")]
 mod link;
+#[cfg(all(feature = "full", feature = "list_mode"))]
+mod list_mode_persistence_tests;
 #[cfg(feature = "minimal")]
 mod ops;
 #[cfg(any(feature = "minimal", feature = "verify"))]

@@ -265,10 +265,11 @@
 | ✅ Phase 2 | Positional operations (insert/delete/insert_after) | DONE | Complete |
 | ✅ Phase 3 | Unit tests + integration test | DONE | Complete |
 | ✅ Phase 4 | Client-controlled keys API | 1-2 days | Complete |
-| 🚧 Phase 5 | Persistence integration + storage tests | 2-3 days | Not started |
-| 🚧 Phase 6 | Balancing decision + implementation (if needed) | 3-5 days | Not started |
+| 🚧 Phase 5A | Persistence structure (TreeType + list_ops module) | 1 day | Complete |
+| 🚧 Phase 5B | Persistence commit logic + integration tests | 1-2 days | In Progress |
+| ✅ Phase 6 | AVL balancing for list mode | 1 day | Complete |
 | 🚧 Phase 7 | Proof system design + implementation | 1-2 weeks | Not started |
-| 🚧 Phase 8 | Performance benchmarking + optimization | 1 week | Not started |
+| 🚧 Phase 8 | Batch operations (Option B) + optimization | 1 week | Not started |
 | 🚧 Phase 9 | Collaborative editing protocol + demo | 2-3 weeks | Not started |
 
 ---
@@ -332,6 +333,215 @@ The test demonstrates:
 
 ---
 
-*Last updated: October 24, 2025*
+## 🚧 Phase 5: Persistence Integration (In Progress)
+
+### Goals
+Integrate list_mode operations with GroveDB's batch write system and RocksDB persistence layer.
+
+### Current Architecture Analysis
+
+**Merk Batch System:**
+- Primary method: `Merk::apply(batch, aux, options, grove_version)`
+- Batch format: `&[(key: Vec<u8>, Op)]` where Op is Put/Delete/etc
+- Apply process: Sorts batch → Walker::apply_to → Commits to storage
+- Key-based operations: All current ops are key→value mappings
+
+**List Mode Challenge:**
+- List operations are positional, not key-based
+- `insert_at_position(pos, value)` generates a random UUID key internally
+- Parent pointers and subtree_size must persist and reload correctly
+- Need storage-backed fetch closure for `insert_after_key`
+
+### Implementation Tasks
+
+#### Task 1: Add ListTree Variant to TreeType ⏳
+**File:** `merk/src/tree_type.rs`
+
+```rust
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum TreeType {
+    NormalTree = 0,
+    SumTree = 1,
+    BigSumTree = 2,
+    CountTree = 3,
+    CountSumTree = 4,
+    ListTree = 5,  // NEW: For collaborative editing with positional ops
+}
+```
+
+**Changes needed:**
+- Update `TryFrom<u8>` implementation
+- Update `Display` implementation  
+- Modify `inner_node_type()` to return list-mode NodeType when appropriate
+
+#### Task 2: Positional Operations via Merk API 🔲
+**Challenge:** How to expose `insert_at_position` through Merk's batch interface?
+
+**Option A: Direct Merk Methods**
+```rust
+impl Merk {
+    pub fn insert_at_position(&mut self, position: u64, value: Vec<u8>) 
+        -> CostResult<Vec<u8>, Error> {
+        // Get root, call TreeNode::insert_at_position, set_root
+    }
+    
+    pub fn delete_at_position(&mut self, position: u64) 
+        -> CostResult<(Vec<u8>, Vec<u8>), Error> {
+        // Get root, call TreeNode::delete_at_position, set_root
+    }
+}
+```
+
+**Option B: Custom ListOp Batch Type**
+```rust
+pub enum ListOp {
+    InsertAtPosition { position: u64, value: Vec<u8> },
+    DeleteAtPosition { position: u64 },
+    InsertAfterKey { target_key: Vec<u8>, value: Vec<u8> },
+}
+
+impl Merk {
+    pub fn apply_list_ops(&mut self, ops: &[ListOp], grove_version: &GroveVersion)
+        -> CostResult<(), Error>;
+}
+```
+
+**Decision needed:** Which approach better fits GroveDB's architecture?
+
+#### Task 3: Storage-Backed Fetch Closure 🔲
+**Current state:** Tests use HashMap-based in-memory fetch
+**Need:** RocksDB-backed fetch for production use
+
+**Important Note - Lazy-Loading Behavior:**
+After reopening a Merk from storage, only the root node is loaded in memory. Children exist as `Link::Reference` (key + hash only, ~36 bytes). This is **intentional and optimal** for large trees:
+- Opening a tree is O(1) regardless of size
+- `RefWalker::walk(left/right)` loads children on-demand from RocksDB
+- Operations that traverse (insert_at_position, delete_at_position) naturally load nodes as they descend
+- Direct UUID lookups via `fetch_node()` are O(1) RocksDB gets
+- RocksDB caching keeps hot nodes in memory
+
+This means:
+- Range operations will lazily load nodes in the range (acceptable performance)
+- Proof generation walks tree and loads nodes on the path (expected behavior)
+- No need to pre-load entire tree - let lazy-loading + caching handle it
+
+```rust
+impl Merk {
+    pub fn insert_after_key_with_storage(
+        &mut self, 
+        target_key: &[u8], 
+        value: Vec<u8>,
+        grove_version: &GroveVersion
+    ) -> CostResult<Vec<u8>, Error> {
+        // Create fetch closure that reads from self.storage
+        let fetch = |key: &[u8]| -> Option<TreeNode> {
+            // Load node from RocksDB
+            // Parse TreeNode from bytes
+            // Return node if found
+        };
+        
+        // Use TreeNode::insert_after_key with storage-backed fetch
+    }
+}
+```
+
+**Challenges:**
+- Efficient node loading from storage
+- Caching to avoid repeated DB reads
+- Cost accounting for storage operations
+
+#### Task 4: Integration Tests with RocksDB ⏳
+**File:** `merk/src/tree/list_mode_persistence_tests.rs` (created)
+
+**Test scenarios:**
+1. ✅ Basic persistence: insert → verify structure
+2. 🔲 Roundtrip: create → commit → close → reopen → verify
+3. 🔲 Parent pointers survive serialization
+4. 🔲 Subtree sizes persist correctly
+5. 🔲 Collaborative editing with persistence
+6. 🔲 AVL rotations persist correctly
+
+**Current status:** Skeleton tests created, awaiting implementation
+
+#### Task 5: Transaction Support 🔲
+**Goal:** Atomic list operations within GroveDB transactions
+
+**Requirements:**
+- Operations must be transactional (all-or-nothing)
+- Integrate with GroveDB's batch commit system
+- Support rollback on error
+- Maintain ACID properties
+
+#### Task 6: Serialization Format Verification 🔲
+**Verify that encoding/decoding preserves:**
+- list_mode flag
+- subtree_size values
+- parent_key pointers
+- child_side flags
+- Node hashes (including parent in hash)
+
+### Test Matrix
+
+| Feature | Unit Test | Integration Test | Status |
+|---------|-----------|------------------|--------|
+| TreeType::ListTree | 🔲 | N/A | Not started |
+| insert_at_position persistence | 🔲 | 🔲 | Not started |
+| delete_at_position persistence | 🔲 | 🔲 | Not started |
+| Parent pointer serialization | 🔲 | 🔲 | Not started |
+| Subtree size persistence | 🔲 | 🔲 | Not started |
+| Storage-backed fetch | 🔲 | 🔲 | Not started |
+| Transaction atomicity | N/A | 🔲 | Not started |
+| Roundtrip consistency | N/A | 🔲 | Not started |
+
+### Open Questions
+
+1. **TreeType vs list_mode flag:** Should ListTree be a separate TreeType, or keep using the per-node list_mode flag?
+   - Current: Per-node flag allows mixed trees
+   - Proposed: TreeType enforces homogeneous list mode
+   - Trade-off: Flexibility vs type safety
+
+2. **Batch API design:** How should positional operations integrate with Merk's batch system?
+   - Option A: Direct methods on Merk (simpler, less batch-oriented)
+   - Option B: Custom ListOp batch type (more consistent with existing API)
+
+3. **Performance:** What's the overhead of parent pointer storage?
+   - Need to benchmark: with vs without parent pointers
+   - Measure: storage size, read/write speeds, hash computation time
+
+4. **Compatibility:** How to handle existing Merk trees when adding ListTree type?
+   - Migration path needed?
+   - Versioning strategy?
+
+---
+
+## Recent Progress (Current Session)
+
+### ✅ Accomplishments
+1. **Fixed Compilation Errors**: Iteratively fixed 10 compilation errors in `list_ops.rs`
+   - Fixed error variant names (InvalidInput → InvalidInputError)
+   - Fixed CostResult return types with proper wrapping
+   - Fixed flat_map_ok usage to match CostContext patterns
+2. **TreeType::ListTree**: Added enum variant = 5 with feature gates
+3. **list_ops Module**: Created 317-line module with 3 direct methods
+4. **Documentation**: Created two comprehensive docs (400+ lines total)
+   - `docs/list_mode_persistence_options.md` - Detailed comparison
+   - `docs/list_mode_persistence_decision.md` - Decision rationale
+5. **Test Status**: All 248 tests passing (5 new tests since Phase 4)
+
+### 🚧 Current State
+- **Phase 5A** (Persistence Structure): ✅ **COMPLETED**
+- **Phase 5B** (Commit Logic): 🚧 **IN PROGRESS**
+- **Phase 6** (AVL Rotations): ✅ **COMPLETED** (10 tests passing)
+
+### 📋 Next Steps (Priority Order)
+1. Implement commit logic in `insert_at_position` and `delete_at_position`
+2. Solve borrow checker challenge for `insert_after_key`
+3. Write RocksDB integration tests
+4. Verify parent pointer and AVL balance persistence
+5. Move to Phase 7 (Proof System)
+
+---
+
+*Last updated: Current Session*
 *Branch: merk-list-mode*
-*Status: Experimental - Core operations complete, persistence/proofs pending*
+*Status: Phase 5B (Commit Logic) in progress - 248 tests passing, compilation successful*
