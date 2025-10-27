@@ -5,7 +5,7 @@ edition = "2021"
 default-run = "tutorials"
 
 [dependencies]
-grovedb-merk = { path = "../merk" }
+grovedb-merk = { path = "../merk", features = ["full", "list_mode"] }
 grovedb = { path = "../grovedb" }
 grovedb-path = { path = "../path" }
 grovedb-storage = { path = "../storage" }

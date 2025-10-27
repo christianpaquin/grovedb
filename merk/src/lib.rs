@@ -92,5 +92,7 @@ pub use crate::merk::{
     prove::{ProofConstructionResult, ProofWithoutEncodingResult},
     KVIterator, Merk, MerkType, RootHashKeyAndAggregateData,
 };
+#[cfg(all(feature = "full", feature = "list_mode"))]
+pub use crate::merk::list_ops::{ListOp, ListBatchResult};
 #[cfg(feature = "minimal")]
 pub use crate::visualize::VisualizeableMerk;
