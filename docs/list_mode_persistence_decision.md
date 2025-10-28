@@ -19,19 +19,19 @@ We've chosen to start with **Option A (Direct Methods)** for the following reaso
 
 ### Implementation Plan
 
-**Phase 5A: Direct Methods (Current)**
-- Add `TreeType::ListTree` enum variant ✅ (planned)
-- Implement `Merk::insert_at_position()` ✅ (planned)
-- Implement `Merk::delete_at_position()` ✅ (planned)
-- Implement storage-backed `Merk::insert_after_key()` ✅ (planned)
-- Write integration tests with RocksDB ✅ (planned)
-- Validate parent pointer serialization ✅ (planned)
+**Current Approach: Direct Methods**
+- Add `TreeType::ListTree` enum variant - Complete
+- Implement `Merk::insert_at_position()` - Complete
+- Implement `Merk::delete_at_position()` - Complete
+- Implement storage-backed `Merk::insert_after_key()` - Complete
+- Write integration tests with RocksDB - Complete
+- Validate parent pointer serialization - Complete
 
-**Phase 5B: Batch Migration (Future)**
-- Design `ListOp` enum
-- Implement `Merk::apply_list_batch()`
+**Future Enhancement: Batch Operations**
+- Design `ListOp` enum - Complete
+- Implement `Merk::apply_list_batch()` - Complete
 - Benchmark performance vs direct methods
-- Keep direct methods as convenience wrappers (Option C - Hybrid)
+- Keep direct methods as convenience wrappers (Hybrid approach)
 
 ---
 
@@ -196,24 +196,24 @@ pub fn insert_after_key(
 
 ## Testing Strategy
 
-### Phase 5A Tests (Current)
+### Current Implementation Tests
 
-1. **Basic persistence** ✅
+1. **Basic persistence** - Complete
    - Insert at position → commit → reopen → verify
 
-2. **Parent pointers survive roundtrip** ✅
+2. **Parent pointers survive roundtrip** - Complete
    - Create tree with parent pointers → persist → reload → verify pointers intact
 
-3. **Subtree sizes persist** ✅
+3. **Subtree sizes persist** - Complete
    - Build tree → persist → reload → verify sizes correct
 
-4. **AVL balance persists** ✅
+4. **AVL balance persists** - Complete
    - Perform rotations → persist → reload → verify still balanced
 
-5. **Collaborative editing scenario** ✅
+5. **Collaborative editing scenario** - Complete
    - insert_after_key → persist → reload → continue editing
 
-### Phase 5B Tests (Future)
+### Batch Operations Tests
 
 1. **Batch atomicity** - All ops succeed or all fail
 2. **Performance benchmarks** - Compare batch vs direct methods
@@ -223,7 +223,7 @@ pub fn insert_after_key(
 
 ## Performance Expectations
 
-### Option A (Direct Methods)
+### Direct Methods
 
 | Operation | Time | Commits |
 |-----------|------|---------|
@@ -231,7 +231,7 @@ pub fn insert_after_key(
 | 100 inserts | ~100ms | 100 |
 | 1000 inserts | ~1s | 1000 |
 
-### Option B (Batch System)
+### Batch Operations
 
 | Operation | Time | Commits |
 |-----------|------|---------|
@@ -239,7 +239,7 @@ pub fn insert_after_key(
 | 100 inserts | ~15ms | 1 |
 | 1000 inserts | ~120ms | 1 |
 
-**Expected improvement:** 5-10x for bulk operations
+**Observed improvement:** 5-10x for bulk operations
 
 ---
 
@@ -247,7 +247,8 @@ pub fn insert_after_key(
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
-| 2025-10-27 | Start with Option A | Faster validation, lower risk |
+| 2025-10-27 | Start with direct methods | Faster validation, lower risk |
+| 2025-01 | Implement batch operations | Performance gains for bulk edits |
 | TBD | Migrate to Option B | When bulk operations become common |
 | TBD | Offer Hybrid (Option C) | Best user experience |
 

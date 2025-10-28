@@ -131,7 +131,7 @@ impl Document {
 }
 
 fn main() {
-    println!("\n🎨 Collaborative Editing Demo with Merk List Mode 🎨\n");
+    println!("\nCollaborative Editing Demo with Merk List Mode\n");
     println!("This demo simulates multiple users editing a document concurrently");
     println!("using batch operations for efficient multi-character insertion.\n");
 
@@ -144,21 +144,21 @@ fn main() {
     let carol = User::new("Carol", "\x1b[35m"); // Magenta
 
     // === Scenario 1: Initial document creation ===
-    println!("\n📝 Scenario 1: Alice creates the initial document\n");
+    println!("\nScenario 1: Alice creates the initial document\n");
 
     let ops = alice.type_text("Hello World", 0);
     doc.apply_operations(ops);
     doc.display("After Alice's initial text");
 
     // === Scenario 2: Bob edits in the middle ===
-    println!("\n📝 Scenario 2: Bob inserts text in the middle\n");
+    println!("\nScenario 2: Bob inserts text in the middle\n");
 
     let ops = bob.type_text(" Beautiful", 5); // After "Hello"
     doc.apply_operations(ops);
     doc.display("After Bob's insertion");
 
     // === Scenario 3: Carol appends at the end ===
-    println!("\n📝 Scenario 3: Carol adds to the end\n");
+    println!("\nScenario 3: Carol adds to the end\n");
 
     let current_len = doc.len();
     let ops = carol.type_text("!", current_len as u64);
@@ -166,7 +166,7 @@ fn main() {
     doc.display("After Carol's addition");
 
     // === Scenario 4: Alice makes multiple edits ===
-    println!("\n📝 Scenario 4: Alice makes corrections\n");
+    println!("\nScenario 4: Alice makes corrections\n");
 
     // Delete "Beautiful " (10 chars at position 5)
     let mut ops = alice.delete_range(5, 10);
@@ -179,7 +179,7 @@ fn main() {
     doc.display("After Alice inserts 'Awesome '");
 
     // === Scenario 5: Concurrent edits (simulated) ===
-    println!("\n📝 Scenario 5: Multiple users edit simultaneously (batch applied)\n");
+    println!("\nScenario 5: Multiple users edit simultaneously (batch applied)\n");
 
     // Collect operations from multiple users
     let mut all_ops = Vec::new();
@@ -204,7 +204,7 @@ fn main() {
     doc.display("After concurrent batch operations");
 
     // === Scenario 6: Complex editing workflow ===
-    println!("\n📝 Scenario 6: Complex editing workflow\n");
+    println!("\nScenario 6: Complex editing workflow\n");
 
     // Alice fixes the prefix
     let ops = alice.delete_range(0, 4); // Delete ">>> "
@@ -229,7 +229,7 @@ fn main() {
     doc.display("After Carol's word replacement");
 
     // === Final summary ===
-    println!("\n✨ Final Document Summary ✨\n");
+    println!("\nFinal Document Summary\n");
     println!("The document has been collaboratively edited by:");
     println!("  {}• Alice{} (Blue) - Created initial text, made corrections", alice.color, "\x1b[0m");
     println!("  {}• Bob{} (Green) - Added text, emphasis", bob.color, "\x1b[0m");
@@ -237,19 +237,6 @@ fn main() {
     println!();
     doc.display("FINAL DOCUMENT");
 
-    println!("\n🎯 Key Takeaways:");
-    println!("  • Batch operations enable efficient multi-character insertion");
-    println!("  • Each character has a stable UUID identity in the real implementation");
-    println!("  • All operations are atomic (all-or-nothing)");
-    println!("  • O(log n) performance per character with balanced tree");
-    println!("  • Single commit per batch reduces storage overhead\n");
+    println!();
 
-    println!("📊 Performance Benefits:");
-    println!("  Individual ops: O(N × log n) with N commits");
-    println!("  Batch ops:      O(N × log n) with 1 commit");
-    println!("  Speedup:        10-100x for large character sequences");
-    println!("\n  This demo applied {} operations in {} batch commits!", 
-             doc.operation_count, doc.batch_count);
-    println!("  With individual commits, that would have been {} separate commits!\n", 
-             doc.operation_count);
 }

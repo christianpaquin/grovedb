@@ -194,7 +194,7 @@ impl TreeNode {
         }
     }
 
-    // ===== List-mode (Phase 1: data shape & conversion stubs) =====
+    // ===== List mode operations =====
     #[cfg(feature = "list_mode")]
     #[inline]
     pub fn is_list_mode(&self) -> bool { self.list_mode }

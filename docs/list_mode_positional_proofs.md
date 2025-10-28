@@ -65,7 +65,7 @@ Current verification in `merk/src/proofs/tree.rs`:
 
 ## Proposed Solution: Phased Approach
 
-### Phase 7A: Extend Proof Format (DESIGN ONLY)
+### Step 1: Extend Proof Format
 
 Add new Node variants for list-mode proofs:
 
@@ -89,7 +89,7 @@ pub enum Node {
 - Encode subtree_size as varint (typically 1-2 bytes for reasonable document sizes)
 - Maintain backward compatibility with existing proof format
 
-### Phase 7B: Implement prove_position() (DESIGN ONLY)
+### Step 2: Implement prove_position()
 
 ```rust
 impl<'db, S> Merk<S>
@@ -125,7 +125,7 @@ where
     ) -> CostResult<PositionalProof, Error> {
         // Implementation would be similar to prove_unchecked but using
         // positional navigation instead of key-based QueryItems
-        todo!("Phase 7B: Implement positional proof generation")
+        todo!("Implement positional proof generation")
     }
 }
 ```
@@ -165,7 +165,7 @@ fn navigate_to_position(tree: &TreeNode, target_position: u64) -> ProofPath {
 }
 ```
 
-### Phase 7C: Implement prove_range() (DESIGN ONLY)
+### Step 3: Implement prove_range()
 
 ```rust
 impl<'db, S> Merk<S>
@@ -200,12 +200,12 @@ where
         end_position: u64,
         grove_version: &GroveVersion,
     ) -> CostResult<RangeProof, Error> {
-        todo!("Phase 7C: Implement range proof generation")
+        todo!("Implement range proof generation")
     }
 }
 ```
 
-### Phase 7D: Implement Proof Verification (DESIGN ONLY)
+### Step 4: Implement Proof Verification
 
 ```rust
 /// Verifies a positional proof and returns the proven element.
@@ -235,7 +235,7 @@ pub fn verify_positional_proof(
     root_hash: &CryptoHash,
     grove_version: &GroveVersion,
 ) -> Result<(Vec<u8>, Vec<u8>), Error> {
-    todo!("Phase 7D: Implement positional proof verification")
+    todo!("Implement positional proof verification")
 }
 ```
 
@@ -244,7 +244,7 @@ pub fn verify_positional_proof(
 Given the complexity of implementing a full positional proof system, we recommend the following prioritization:
 
 ### High Priority (Required for Production)
-1. **Design documentation** (this document) ✅
+1. **Design documentation** (this document) - Complete
 2. **Proof format design** - Extend Node enum with subtree_size variants
 3. **Basic prove_position()** - Single element positional proof
 
@@ -288,16 +288,13 @@ Document proofs work on keys only, applications must:
 
 ## Recommendation
 
-Implement **Phase 7A-7C (design and basic implementation)** as documented above. This provides:
+Implement the design as documented above. This provides:
 - Verifiable positional proofs for list-mode trees
 - Consistent with Merk's cryptographic proof approach
 - Foundation for future optimizations
 - Clear migration path from current system
 
-Defer **Phase 7D (full verification)** until after production deployment feedback, as:
-- Verification can be added incrementally
-- Early users may only need proof generation (server-side)
-- Verification complexity can be validated against real use cases
+Full verification can be added based on production needs and user feedback.
 
 ## Related Documents
 - [List Mode Implementation Status](list_mode_implementation_status.md)
@@ -306,10 +303,10 @@ Defer **Phase 7D (full verification)** until after production deployment feedbac
 
 ## Status
 
-**Current Phase:** Design Complete
-**Implementation Status:** Not Started
-**Blocking Issues:** None
+**Current Status:** Design Complete
 **Next Steps:** 
-1. Review design with team
-2. Implement Phase 7A (proof format extension)
-3. Implement Phase 7B (prove_position generation)
+1. Implement proof format extension
+2. Implement prove_position generation
+3. Add verification logic based on use case requirements
+
+```
