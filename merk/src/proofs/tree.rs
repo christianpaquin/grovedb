@@ -13,6 +13,8 @@ use grovedb_costs::{
 use super::{Node, Op};
 #[cfg(any(feature = "minimal", feature = "verify"))]
 use crate::tree::{combine_hash, kv_digest_to_kv_hash, kv_hash, node_hash, value_hash, NULL_HASH};
+#[cfg(all(any(feature = "minimal", feature = "verify"), feature = "list_mode"))]
+use crate::tree::node_hash_list_mode;
 #[cfg(any(feature = "minimal", feature = "verify"))]
 use crate::{error::Error, tree::CryptoHash};
 #[cfg(feature = "minimal")]
@@ -108,6 +110,31 @@ impl Tree {
             node_hash(&kv_hash, &tree.child_hash(true), &tree.child_hash(false))
         }
 
+        #[cfg(feature = "list_mode")]
+        fn compute_hash_list_mode(tree: &Tree, kv_hash: CryptoHash, subtree_size: u64) -> CostContext<CryptoHash> {
+            // For list-mode proofs, use node_hash_list_mode with None for parent_key
+            // since proofs don't include parent information
+            let left_hash = tree.child_hash(true);
+            let right_hash = tree.child_hash(false);
+            
+            #[cfg(test)]
+            eprintln!("[HASH] Computing list-mode hash: kv_hash={:?}, left={:?}, right={:?}, size={}", 
+                kv_hash, left_hash, right_hash, subtree_size);
+            
+            let result = node_hash_list_mode(
+                &kv_hash,
+                &left_hash,
+                &right_hash,
+                subtree_size,
+                &None,
+            );
+            
+            #[cfg(test)]
+            eprintln!("[HASH] Result: {:?}", result.value);
+            
+            result
+        }
+
         match &self.node {
             Node::Hash(hash) => (*hash).wrap_with_cost(Default::default()),
             Node::KVHash(kv_hash) => compute_hash(self, *kv_hash),
@@ -130,6 +157,47 @@ impl Tree {
 
                 kv_digest_to_kv_hash(key.as_slice(), &combined_value_hash)
                     .flat_map(|kv_hash| compute_hash(self, kv_hash))
+            }
+            // List-mode variants with subtree_size
+            Node::HashWithSubtreeSize(hash, _size) => {
+                // For list-mode, hash already includes subtree_size in computation
+                (*hash).wrap_with_cost(Default::default())
+            }
+            Node::KVWithSubtreeSize(key, value, size) => {
+                // For list-mode, compute kv_hash then use node_hash_list_mode
+                #[cfg(feature = "list_mode")]
+                {
+                    kv_hash(key.as_slice(), value.as_slice())
+                        .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size))
+                }
+                #[cfg(not(feature = "list_mode"))]
+                {
+                    // Fallback if list_mode feature not enabled (shouldn't happen)
+                    kv_hash(key.as_slice(), value.as_slice())
+                        .flat_map(|kv_hash| compute_hash(self, kv_hash))
+                }
+            }
+            Node::KVValueHashWithSubtreeSize(key, _, value_hash, size) => {
+                // For list-mode with value hash, use node_hash_list_mode
+                #[cfg(feature = "list_mode")]
+                {
+                    #[cfg(test)]
+                    eprintln!("[HASH] KVValueHashWithSubtreeSize: key={:?}, value_hash={:?}, size={}", 
+                        String::from_utf8_lossy(key.as_slice()), value_hash, size);
+                    
+                    kv_digest_to_kv_hash(key.as_slice(), value_hash)
+                        .flat_map(|kv_hash| {
+                            #[cfg(test)]
+                            eprintln!("[HASH] Computed kv_hash: {:?}", kv_hash);
+                            compute_hash_list_mode(self, kv_hash, *size)
+                        })
+                }
+                #[cfg(not(feature = "list_mode"))]
+                {
+                    // Fallback if list_mode feature not enabled (shouldn't happen)
+                    kv_digest_to_kv_hash(key.as_slice(), value_hash)
+                        .flat_map(|kv_hash| compute_hash(self, kv_hash))
+                }
             }
         }
     }

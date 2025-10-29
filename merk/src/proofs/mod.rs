@@ -4,6 +4,8 @@
 pub mod chunk;
 #[cfg(any(feature = "minimal", feature = "verify"))]
 pub mod encoding;
+#[cfg(feature = "list_mode")]
+pub mod positional;
 #[cfg(any(feature = "minimal", feature = "verify"))]
 pub mod query;
 #[cfg(any(feature = "minimal", feature = "verify"))]
@@ -82,6 +84,16 @@ pub enum Node {
     /// Represents the key, value of some referenced node and value_hash of
     /// current tree node
     KVRefValueHash(Vec<u8>, Vec<u8>, CryptoHash),
+
+    // List-mode variants with subtree_size for positional proofs
+    /// Represents the hash and subtree_size of a tree node (for list-mode)
+    HashWithSubtreeSize(CryptoHash, u64),
+
+    /// Represents the key/value pair and subtree_size of a tree node (for list-mode)
+    KVWithSubtreeSize(Vec<u8>, Vec<u8>, u64),
+
+    /// Represents the key, value, value_hash and subtree_size of a tree node (for list-mode)
+    KVValueHashWithSubtreeSize(Vec<u8>, Vec<u8>, CryptoHash, u64),
 }
 
 use std::fmt;
@@ -118,6 +130,24 @@ impl fmt::Display for Node {
                 hex_to_ascii(value),
                 hex::encode(value_hash),
                 feature_type
+            ),
+            Node::HashWithSubtreeSize(hash, size) => {
+                format!("HashWithSubtreeSize(HASH[{}], size={})", hex::encode(hash), size)
+            }
+            Node::KVWithSubtreeSize(key, value, size) => {
+                format!(
+                    "KVWithSubtreeSize({}, {}, size={})",
+                    hex_to_ascii(key),
+                    hex_to_ascii(value),
+                    size
+                )
+            }
+            Node::KVValueHashWithSubtreeSize(key, value, value_hash, size) => format!(
+                "KVValueHashWithSubtreeSize({}, {}, HASH[{}], size={})",
+                hex_to_ascii(key),
+                hex_to_ascii(value),
+                hex::encode(value_hash),
+                size
             ),
         };
         write!(f, "{}", node_string)

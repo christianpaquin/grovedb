@@ -1,6 +1,6 @@
 use std::collections::LinkedList;
 
-use grovedb_costs::{CostResult, CostsExt};
+use grovedb_costs::{CostResult, CostsExt, OperationCost};
 use grovedb_storage::StorageContext;
 use grovedb_version::version::GroveVersion;
 
@@ -137,6 +137,86 @@ where
                     ref_walker.create_proof(query_items, limit, left_to_right, grove_version)
                 })
                 .map_ok(|(proof, _, status, ..)| (proof, status.limit))
+        })
+    }
+
+    /// Creates a Merkle proof for the element at the given position in a list-mode tree.
+    /// 
+    /// This generates a positional proof that proves an element exists at a specific
+    /// 0-based index in the tree's in-order traversal. The proof includes subtree_size
+    /// metadata for each node along the path, enabling position-based verification.
+    /// 
+    /// # Arguments
+    /// * `position` - The 0-based position to prove (0 = first element)
+    /// * `grove_version` - Version for hash computation
+    /// 
+    /// # Returns
+    /// `ProofConstructionResult` containing the encoded proof and any limit information
+    /// 
+    /// # Errors
+    /// Returns `Error` if:
+    /// - Tree is not in list mode
+    /// - Position is out of bounds
+    /// - Tree is empty
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let proof_result = merk.prove_position(5, &grove_version)?;
+    /// // Proof can be verified to show element at index 5
+    /// ```
+    #[cfg(feature = "list_mode")]
+    pub fn prove_position(
+        &self,
+        position: u64,
+        grove_version: &GroveVersion,
+    ) -> CostResult<ProofConstructionResult, Error> {
+        self.prove_position_unchecked(position, grove_version)
+            .map_ok(|proof| {
+                let mut bytes = Vec::with_capacity(128);
+                encode_into(proof.iter(), &mut bytes);
+                ProofConstructionResult::new(bytes, None)
+            })
+    }
+
+    /// Creates a Merkle proof for the element at the given position without encoding.
+    /// 
+    /// This is the internal implementation of positional proof generation.
+    /// Returns the proof in an intermediate format (LinkedList of ProofOp) before encoding.
+    #[cfg(feature = "list_mode")]
+    pub fn prove_position_unchecked(
+        &self,
+        position: u64,
+        grove_version: &GroveVersion,
+    ) -> CostResult<LinkedList<ProofOp>, Error> {
+        self.use_tree_mut(|maybe_tree| {
+            maybe_tree
+                .ok_or(Error::CorruptedCodeExecution(
+                    "Expected tree to exist for positional proof",
+                ))
+                .wrap_with_cost(Default::default())
+                .flat_map_ok(|tree| {
+                    #[cfg(feature = "list_mode")]
+                    if !tree.list_mode {
+                        return Err(Error::InvalidInputError(
+                            "prove_position can only be called on list-mode trees",
+                        ))
+                        .wrap_with_cost(Default::default());
+                    }
+
+                    #[cfg(feature = "list_mode")]
+                    {
+                        let subtree_size = tree.subtree_size();
+                        if position >= subtree_size {
+                            return Err(Error::CorruptedCodeExecution(
+                                "Position is out of bounds for tree",
+                            ))
+                            .wrap_with_cost(Default::default());
+                        }
+                    }
+
+                    let mut walker = RefWalker::new(tree, self.source());
+                    walker.create_positional_proof(position, grove_version)
+                })
         })
     }
 }

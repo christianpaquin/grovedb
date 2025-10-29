@@ -461,6 +461,9 @@ mod test {
                 Node::KVDigest(..) => counts.kv_digest += 1,
                 Node::KVRefValueHash(..) => counts.kv_ref_value_hash += 1,
                 Node::KVValueHashFeatureType(..) => counts.kv_value_hash_feature_type += 1,
+                Node::HashWithSubtreeSize(..) => counts.hash += 1,
+                Node::KVWithSubtreeSize(..) => counts.kv += 1,
+                Node::KVValueHashWithSubtreeSize(..) => counts.kv_value_hash += 1,
             };
         });
 

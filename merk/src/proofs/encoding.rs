@@ -136,6 +136,60 @@ impl Encode for Op {
                 feature_type.encode_into(dest)?;
             }
 
+            // List-mode variants with subtree_size
+            Op::Push(Node::HashWithSubtreeSize(hash, size)) => {
+                dest.write_all(&[0x14])?;
+                dest.write_all(hash)?;
+                size.encode_into(dest)?;
+            }
+            Op::Push(Node::KVWithSubtreeSize(key, value, size)) => {
+                debug_assert!(key.len() < 256);
+                debug_assert!(value.len() < 65536);
+
+                dest.write_all(&[0x15, key.len() as u8])?;
+                dest.write_all(key)?;
+                (value.len() as u16).encode_into(dest)?;
+                dest.write_all(value)?;
+                size.encode_into(dest)?;
+            }
+            Op::Push(Node::KVValueHashWithSubtreeSize(key, value, value_hash, size)) => {
+                debug_assert!(key.len() < 256);
+                debug_assert!(value.len() < 65536);
+
+                dest.write_all(&[0x16, key.len() as u8])?;
+                dest.write_all(key)?;
+                (value.len() as u16).encode_into(dest)?;
+                dest.write_all(value)?;
+                dest.write_all(value_hash)?;
+                size.encode_into(dest)?;
+            }
+            Op::PushInverted(Node::HashWithSubtreeSize(hash, size)) => {
+                dest.write_all(&[0x17])?;
+                dest.write_all(hash)?;
+                size.encode_into(dest)?;
+            }
+            Op::PushInverted(Node::KVWithSubtreeSize(key, value, size)) => {
+                debug_assert!(key.len() < 256);
+                debug_assert!(value.len() < 65536);
+
+                dest.write_all(&[0x18, key.len() as u8])?;
+                dest.write_all(key)?;
+                (value.len() as u16).encode_into(dest)?;
+                dest.write_all(value)?;
+                size.encode_into(dest)?;
+            }
+            Op::PushInverted(Node::KVValueHashWithSubtreeSize(key, value, value_hash, size)) => {
+                debug_assert!(key.len() < 256);
+                debug_assert!(value.len() < 65536);
+
+                dest.write_all(&[0x19, key.len() as u8])?;
+                dest.write_all(key)?;
+                (value.len() as u16).encode_into(dest)?;
+                dest.write_all(value)?;
+                dest.write_all(value_hash)?;
+                size.encode_into(dest)?;
+            }
+
             Op::Parent => dest.write_all(&[0x10])?,
             Op::Child => dest.write_all(&[0x11])?,
             Op::ParentInverted => dest.write_all(&[0x12])?,
@@ -169,6 +223,18 @@ impl Encode for Op {
             }
             Op::PushInverted(Node::KVValueHashFeatureType(key, value, _, feature_type)) => {
                 4 + key.len() + value.len() + HASH_LENGTH + feature_type.encoding_length()?
+            }
+            Op::Push(Node::HashWithSubtreeSize(_, _)) => 1 + HASH_LENGTH + 8, // u64 for size
+            Op::Push(Node::KVWithSubtreeSize(key, value, _)) => 4 + key.len() + value.len() + 8,
+            Op::Push(Node::KVValueHashWithSubtreeSize(key, value, _, _)) => {
+                4 + key.len() + value.len() + HASH_LENGTH + 8
+            }
+            Op::PushInverted(Node::HashWithSubtreeSize(_, _)) => 1 + HASH_LENGTH + 8,
+            Op::PushInverted(Node::KVWithSubtreeSize(key, value, _)) => {
+                4 + key.len() + value.len() + 8
+            }
+            Op::PushInverted(Node::KVValueHashWithSubtreeSize(key, value, _, _)) => {
+                4 + key.len() + value.len() + HASH_LENGTH + 8
             }
             Op::Parent => 1,
             Op::Child => 1,
@@ -346,6 +412,75 @@ impl Decode for Op {
             0x11 => Self::Child,
             0x12 => Self::ParentInverted,
             0x13 => Self::ChildInverted,
+            
+            // List-mode variants with subtree_size
+            0x14 => {
+                let mut hash = [0; HASH_LENGTH];
+                input.read_exact(&mut hash)?;
+                let size: u64 = Decode::decode(&mut input)?;
+                Self::Push(Node::HashWithSubtreeSize(hash, size))
+            }
+            0x15 => {
+                let key_len: u8 = Decode::decode(&mut input)?;
+                let mut key = vec![0; key_len as usize];
+                input.read_exact(key.as_mut_slice())?;
+
+                let value_len: u16 = Decode::decode(&mut input)?;
+                let mut value = vec![0; value_len as usize];
+                input.read_exact(value.as_mut_slice())?;
+
+                let size: u64 = Decode::decode(&mut input)?;
+                Self::Push(Node::KVWithSubtreeSize(key, value, size))
+            }
+            0x16 => {
+                let key_len: u8 = Decode::decode(&mut input)?;
+                let mut key = vec![0; key_len as usize];
+                input.read_exact(key.as_mut_slice())?;
+
+                let value_len: u16 = Decode::decode(&mut input)?;
+                let mut value = vec![0; value_len as usize];
+                input.read_exact(value.as_mut_slice())?;
+
+                let mut value_hash = [0; HASH_LENGTH];
+                input.read_exact(&mut value_hash)?;
+
+                let size: u64 = Decode::decode(&mut input)?;
+                Self::Push(Node::KVValueHashWithSubtreeSize(key, value, value_hash, size))
+            }
+            0x17 => {
+                let mut hash = [0; HASH_LENGTH];
+                input.read_exact(&mut hash)?;
+                let size: u64 = Decode::decode(&mut input)?;
+                Self::PushInverted(Node::HashWithSubtreeSize(hash, size))
+            }
+            0x18 => {
+                let key_len: u8 = Decode::decode(&mut input)?;
+                let mut key = vec![0; key_len as usize];
+                input.read_exact(key.as_mut_slice())?;
+
+                let value_len: u16 = Decode::decode(&mut input)?;
+                let mut value = vec![0; value_len as usize];
+                input.read_exact(value.as_mut_slice())?;
+
+                let size: u64 = Decode::decode(&mut input)?;
+                Self::PushInverted(Node::KVWithSubtreeSize(key, value, size))
+            }
+            0x19 => {
+                let key_len: u8 = Decode::decode(&mut input)?;
+                let mut key = vec![0; key_len as usize];
+                input.read_exact(key.as_mut_slice())?;
+
+                let value_len: u16 = Decode::decode(&mut input)?;
+                let mut value = vec![0; value_len as usize];
+                input.read_exact(value.as_mut_slice())?;
+
+                let mut value_hash = [0; HASH_LENGTH];
+                input.read_exact(&mut value_hash)?;
+
+                let size: u64 = Decode::decode(&mut input)?;
+                Self::PushInverted(Node::KVValueHashWithSubtreeSize(key, value, value_hash, size))
+            }
+            
             // TODO: Remove dependency on ed and throw an internal error
             _ => return Err(ed::Error::UnexpectedByte(variant)),
         })

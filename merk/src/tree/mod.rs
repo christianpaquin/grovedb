@@ -144,6 +144,9 @@ pub struct TreeNode {
     #[cfg(feature = "list_mode")]
     /// Cached subtree size (number of elements in this subtree) when list_mode is active.
     pub(crate) subtree_size: u64,
+    #[cfg(feature = "list_mode")]
+    /// Whether to use parent pointers for hashing (false for StandaloneMerk, true for nested trees in GroveDB).
+    pub(crate) use_parent_pointers: bool,
 }
 
 #[cfg(feature = "minimal")]
@@ -173,6 +176,8 @@ impl TreeNode {
             list_mode: false,
             #[cfg(feature = "list_mode")]
             subtree_size: 1,
+            #[cfg(feature = "list_mode")]
+            use_parent_pointers: false, // Default to false for standalone trees
         })
     }
 
@@ -191,6 +196,8 @@ impl TreeNode {
             list_mode: false,
             #[cfg(feature = "list_mode")]
             subtree_size: 1,
+            #[cfg(feature = "list_mode")]
+            use_parent_pointers: false,
         }
     }
 
@@ -276,6 +283,7 @@ impl TreeNode {
             child_side: None,
             list_mode: true,
             subtree_size: 1,
+            use_parent_pointers: false,
         })
     }
 
@@ -759,6 +767,8 @@ impl TreeNode {
             list_mode: false,
             #[cfg(feature = "list_mode")]
             subtree_size: 1,
+            #[cfg(feature = "list_mode")]
+            use_parent_pointers: false,
         })
     }
 
@@ -787,6 +797,8 @@ impl TreeNode {
             list_mode: false,
             #[cfg(feature = "list_mode")]
             subtree_size: 1,
+            #[cfg(feature = "list_mode")]
+            use_parent_pointers: false,
         })
     }
 
@@ -817,6 +829,8 @@ impl TreeNode {
                 list_mode: false,
                 #[cfg(feature = "list_mode")]
                 subtree_size: 1,
+                #[cfg(feature = "list_mode")]
+                use_parent_pointers: false,
             },
         )
     }
@@ -847,6 +861,8 @@ impl TreeNode {
             list_mode: false,
             #[cfg(feature = "list_mode")]
             subtree_size: 1,
+            #[cfg(feature = "list_mode")]
+            use_parent_pointers: false,
         })
     }
 
@@ -1045,6 +1061,16 @@ impl TreeNode {
     pub fn hash(&self) -> CostContext<CryptoHash> {
         #[cfg(feature = "list_mode")]
         if self.list_mode {
+            #[cfg(test)]
+            {
+                let kv_hash = self.inner.kv.hash();
+                let left_hash = self.child_hash(true);
+                let right_hash = self.child_hash(false);
+                let size = self.subtree_size();
+                eprintln!("[TREE_HASH] Computing hash: kv_hash={:?}, left={:?}, right={:?}, size={}, parent_key={:?}", 
+                    kv_hash, left_hash, right_hash, size, self.parent_key);
+            }
+            
             return node_hash_list_mode(
                 self.inner.kv.hash(),
                 self.child_hash(true),
@@ -1312,7 +1338,12 @@ impl TreeNode {
             );
         }
     #[cfg(feature = "list_mode")]
-    let maybe_child = maybe_child.map(|mut child| { child.set_parent_pointer(&parent_key_snapshot, left); child });
+    let maybe_child = maybe_child.map(|mut child| { 
+        if child.use_parent_pointers {
+            child.set_parent_pointer(&parent_key_snapshot, left);
+        }
+        child 
+    });
         *slot = Link::maybe_from_modified_tree(maybe_child);
     #[cfg(feature = "list_mode")]
     if self.list_mode { self.recompute_subtree_size(); }

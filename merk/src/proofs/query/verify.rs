@@ -318,6 +318,31 @@ impl Query {
                         )));
                     }
                 }
+                // List-mode variants - treat similarly to their non-list counterparts
+                // (subtree_size is for positional proofs, not key-based queries)
+                Node::KVWithSubtreeSize(key, value, _size) => {
+                    #[cfg(feature = "proof_debug")]
+                    {
+                        println!("Processing KVWithSubtreeSize node");
+                    }
+                    execute_node(key, Some(value), value_hash(value).unwrap())?;
+                }
+                Node::KVValueHashWithSubtreeSize(key, value, value_hash, _size) => {
+                    #[cfg(feature = "proof_debug")]
+                    {
+                        println!("Processing KVValueHashWithSubtreeSize node");
+                    }
+                    execute_node(key, Some(value), *value_hash)?;
+                }
+                Node::HashWithSubtreeSize(_hash, _size) => {
+                    if in_range {
+                        return Err(Error::InvalidProofError(format!(
+                            "Proof is missing data for query range. Encountered unexpected node \
+                             type: {}",
+                            node
+                        )));
+                    }
+                }
             }
 
             last_push = Some(node.clone());
@@ -338,6 +363,9 @@ impl Query {
                     Some(Node::KVDigest(..)) => {}
                     Some(Node::KVRefValueHash(..)) => {}
                     Some(Node::KVValueHash(..)) => {}
+                    // List-mode variants
+                    Some(Node::KVWithSubtreeSize(..)) => {}
+                    Some(Node::KVValueHashWithSubtreeSize(..)) => {}
 
                     // proof contains abridged data so we cannot verify absence of
                     // remaining query items
