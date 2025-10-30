@@ -11,6 +11,8 @@
 //   UUID-based:     "Insert 'x' after character <uuid-of-H>" (stable!)
 //
 // Reference: https://mattweidner.com/2025/05/21/text-without-crdts.html
+//
+// See `uuid-collab-edit-with-proofs` for a version with proofs
 
 use grovedb_merk::{Merk, ListOp, MerkType, TreeType};
 use grovedb_path::SubtreePath;

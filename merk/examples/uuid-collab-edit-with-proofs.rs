@@ -16,11 +16,10 @@
 // 5. Clients cryptographically verify proof against published root hash
 // 6. If valid, clients apply the operation locally
 //
-// The proofs use Blake3 hashing and encode:
+// The proofs encode:
 // - The value at the claimed position
 // - All intermediate node hashes needed to reconstruct the root
 // - Subtree sizes for position validation
-// - This makes tampering cryptographically detectable
 //
 // Reference: https://mattweidner.com/2025/05/21/text-without-crdts.html
 
@@ -131,7 +130,7 @@ impl CollabServer {
 
         // Generate proof for the newly inserted key
         // In a real system, this would be a full Merkle proof of inclusion
-        // For this demo, we'll create a simple proof showing the key exists
+        // For this demo, we'll create a simple proof showing the key exists (FIXME)
         let proof = self.generate_proof_for_key(&uuid, &root_after)?;
 
         Ok(VerifiableOp {
@@ -225,7 +224,7 @@ impl CollabClient {
         match &verifiable_op.operation {
             ListOp::InsertAtPosition { value, .. } => {
                 if value.len() == 1 {
-                    // In a real system, the UUID would be extracted from the proof
+                    // In a real system, the UUID would be extracted from the proof (FIXME)
                     // For now, we'll generate a placeholder
                     let uuid = format!("uuid_{}", self.characters.len()).into_bytes();
                     let ch = Character {
@@ -245,7 +244,7 @@ impl CollabClient {
                         .map(|p| p + 1)
                         .unwrap_or(self.characters.len());
 
-                    // Extract UUID from proof (in real system)
+                    // Extract UUID from proof (in real system) (FIXME)
                     let uuid = format!("uuid_{}", self.characters.len()).into_bytes();
                     let ch = Character {
                         uuid: uuid.clone(),
@@ -276,7 +275,7 @@ impl CollabClient {
         // We need to extract the position from the proof or track it separately
         
         // For now, we'll verify position 0 (most recent insertion)
-        // In a production system, the position would be included in the VerifiableOp
+        // In a production system, the position would be included in the VerifiableOp (FIXME)
         let position = 0u64;
         
         let grove_version = GroveVersion::latest();
@@ -348,13 +347,6 @@ impl CollabClient {
 
 fn main() {
     println!("\nUUID-Based Collaborative Editing with Merkle Proofs");
-    println!("\"Text Without CRDTs\" + Transparency & Verification\n");
-    println!("Architecture:");
-    println!("  1. Clients send operations to server");
-    println!("  2. Server applies ops and publishes root hash");
-    println!("  3. Server broadcasts ops + Merkle proof to clients");
-    println!("  4. Clients verify proof before applying locally");
-    println!("  5. Transparency log allows independent audit\n");
 
     // Initialize server
     let mut server = CollabServer::new();

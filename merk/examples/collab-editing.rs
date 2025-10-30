@@ -8,6 +8,8 @@
 // - Atomic multi-operation commits
 //
 // Run with: cargo run --example collab-editing
+//
+// See `uuid-collab-editing` and `uuid-collab-edit-with-proofs` for a key-based (vs. position-based) approach.
 
 /// Represents a simulated user in the collaborative editing session
 struct User {

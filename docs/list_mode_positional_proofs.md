@@ -326,7 +326,7 @@ Extend existing proof format to support both key and positional queries.
 
 ## Implementation Status
 
-### ✅ Completed Features
+### Completed Features
 - **Proof generation** (`prove_position()`) - Fully working
 - **Proof verification** (`verify_positional_proof()`) - Cryptographically sound
 - **Test suite** - 13 tests, 10 passing (77%)
@@ -334,7 +334,7 @@ Extend existing proof format to support both key and positional queries.
 - **Hash consistency fix** - `use_parent_pointers` field ensures correct hashing
 - **Documentation** - Inline comments, test documentation, this design doc
 
-### ⚠️ Known Limitations
+### Known Limitations
 
 #### Value Extraction in Complex Proofs
 **Status**: 3 tests disabled with `#[ignore]` attribute
@@ -373,7 +373,7 @@ The current heuristic ("find unique leaf node with size=1") fails when multiple 
 
 **Estimated effort**: 1-2 hours to implement one of the fix options above.
 
-### 📦 Files Modified/Created
+### Files Modified/Created
 
 #### New Files (Not in Upstream)
 - `merk/src/proofs/positional.rs` (1001 lines) - Complete positional proof implementation
@@ -408,21 +408,15 @@ The current heuristic ("find unique leaf node with size=1") fails when multiple 
 ## Security Considerations
 
 ### Cryptographic Guarantees
-- ✅ **Tampering detection**: Any modification to proof/data is detected via root hash mismatch
-- ✅ **Position binding**: Proof cryptographically binds value to its position in the tree
-- ✅ **Collision resistance**: Uses Blake3 hash function (industry standard)
-- ✅ **Tree integrity**: Subtree sizes are part of hash computation, preventing size manipulation
+- **Tampering detection**: Any modification to proof/data is detected via root hash mismatch
+- **Position binding**: Proof cryptographically binds value to its position in the tree
+- **Collision resistance**: Uses Blake3 hash function (industry standard)
+- **Tree integrity**: Subtree sizes are part of hash computation, preventing size manipulation
 
 ### Trust Model
 - **Server**: Generates proofs, can be malicious
 - **Client**: Only trusts root hash (obtained via secure channel)
 - **Security**: Client can verify proofs without trusting server
-
-### Known Non-Issues
-- ⚠️ Value extraction limitation does NOT compromise security
-- ✅ Tampered proofs are always detected (root hash mismatch)
-- ✅ Server cannot forge valid proofs for fake data
-- ✅ Server cannot swap positions without detection
 
 ### Approach 1: Hybrid Proofs
 Instead of new proof format, augment existing key-based proofs with position metadata:
@@ -464,13 +458,5 @@ Full verification can be added based on production needs and user feedback.
 - [List Mode Implementation Status](list_mode_implementation_status.md)
 - [Merk Proofs ADR](../adr/merk-proofs.md)
 - [Query System](../adr/query-system.md)
-
-## Status
-
-**Current Status:** Design Complete
-**Next Steps:** 
-1. Implement proof format extension
-2. Implement prove_position generation
-3. Add verification logic based on use case requirements
 
 ```
