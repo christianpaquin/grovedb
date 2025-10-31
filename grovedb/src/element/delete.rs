@@ -40,6 +40,11 @@ impl Element {
             | (TreeType::BigSumTree, false)
             | (TreeType::CountTree, false)
             | (TreeType::CountSumTree, false) => Op::DeleteMaybeSpecialized,
+            // List mode: treat like normal tree
+            #[cfg(feature = "list_mode")]
+            (TreeType::ListTree, true) => Op::DeleteLayered,
+            #[cfg(feature = "list_mode")]
+            (TreeType::ListTree, false) => Op::Delete,
         };
         let batch = [(key, op)];
         // todo not sure we get it again, we need to see if this is necessary
@@ -99,6 +104,11 @@ impl Element {
             | (TreeType::BigSumTree, false)
             | (TreeType::CountTree, false)
             | (TreeType::CountSumTree, false) => Op::DeleteMaybeSpecialized,
+            // List mode: treat like normal tree
+            #[cfg(feature = "list_mode")]
+            (TreeType::ListTree, true) => Op::DeleteLayered,
+            #[cfg(feature = "list_mode")]
+            (TreeType::ListTree, false) => Op::Delete,
         };
         let batch = [(key, op)];
         // todo not sure we get it again, we need to see if this is necessary
@@ -152,6 +162,11 @@ impl Element {
             | (TreeType::BigSumTree, false)
             | (TreeType::CountTree, false)
             | (TreeType::CountSumTree, false) => Op::DeleteMaybeSpecialized,
+            // List mode: treat like normal tree
+            #[cfg(feature = "list_mode")]
+            (TreeType::ListTree, true) => Op::DeleteLayered,
+            #[cfg(feature = "list_mode")]
+            (TreeType::ListTree, false) => Op::Delete,
         };
         let entry = (key, op);
         batch_operations.push(entry);

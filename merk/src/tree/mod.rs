@@ -2055,6 +2055,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "list_mode")]
     fn test_insert_at_position() {
         // Test inserting nodes at specific positions in a list_mode tree
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
@@ -2089,6 +2090,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "list_mode")]
     fn test_delete_at_position() {
         // Test deleting nodes at specific positions in a list_mode tree
         // Build tree with values: [2, 1, 4, 3] at positions 0, 1, 2, 3
@@ -2144,6 +2146,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "list_mode")]
     fn test_insert_after_key() {
         use std::collections::HashMap;
 
@@ -2209,6 +2212,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "list_mode")]
     fn test_collaborative_document_editing_simulation() {
         use std::collections::HashMap;
 
@@ -2354,6 +2358,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(all(feature = "list_mode", feature = "uuid"))]
     fn test_new_list_node_with_key() {
         // Test creating a list node with a client-provided key
         use uuid::Uuid;
@@ -2370,6 +2375,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(all(feature = "list_mode", feature = "uuid"))]
     fn test_insert_at_position_with_key() {
         use uuid::Uuid;
         
@@ -2429,6 +2435,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(all(feature = "list_mode", feature = "uuid"))]
     fn test_client_controlled_collaborative_editing() {
         use uuid::Uuid;
         

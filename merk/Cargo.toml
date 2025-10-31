@@ -72,3 +72,11 @@ harness = false
 [[bench]]
 name = "ops"
 harness = false
+
+[[example]]
+name = "uuid-collab-editing"
+required-features = ["full", "list_mode"]
+
+[[example]]
+name = "uuid-collab-edit-with-proofs"
+required-features = ["full", "list_mode"]

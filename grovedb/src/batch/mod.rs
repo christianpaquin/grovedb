@@ -1668,6 +1668,8 @@ where
                                             TreeType::BigSumTree => BIG_SUM_TREE_COST_SIZE,
                                             TreeType::CountTree => COUNT_TREE_COST_SIZE,
                                             TreeType::CountSumTree => COUNT_SUM_TREE_COST_SIZE,
+                                            #[cfg(feature = "list_mode")]
+                                            TreeType::ListTree => TREE_COST_SIZE, // List mode trees have similar cost to normal trees
                                         };
                                         let tree_value_cost = tree_cost_size
                                             + flags_len

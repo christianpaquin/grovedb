@@ -53,6 +53,7 @@ harness = false
 default = ["full", "estimated_costs"]
 proof_debug = ["grovedb-merk/proof_debug"]
 serde = ["dep:serde", "grovedb-merk/serde", "indexmap/serde"]
+list_mode = ["grovedb-merk/list_mode", "minimal"]
 full = [
     "grovedb-merk/full",
     "minimal",

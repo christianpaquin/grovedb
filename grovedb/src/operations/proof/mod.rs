@@ -285,5 +285,24 @@ fn node_to_string(node: &Node) -> String {
             hex::encode(value_hash),
             feature_type
         ),
+        // List-mode variants with subtree_size
+        Node::HashWithSubtreeSize(hash, size) => {
+            format!("HashWithSubtreeSize(HASH[{}], size={})", hex::encode(hash), size)
+        }
+        Node::KVWithSubtreeSize(key, value, size) => {
+            format!(
+                "KVWithSubtreeSize({}, {}, size={})",
+                hex_to_ascii(key),
+                element_hex_to_ascii(value),
+                size
+            )
+        }
+        Node::KVValueHashWithSubtreeSize(key, value, value_hash, size) => format!(
+            "KVValueHashWithSubtreeSize({}, {}, HASH[{}], size={})",
+            hex_to_ascii(key),
+            element_hex_to_ascii(value),
+            hex::encode(value_hash),
+            size
+        ),
     }
 }

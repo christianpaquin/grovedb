@@ -295,6 +295,9 @@ impl Element {
                 let v = self.count_sum_value_or_default();
                 Ok(CountedSummedMerkNode(v.0, v.1))
             }
+            // List mode: treat like normal tree
+            #[cfg(feature = "list_mode")]
+            TreeType::ListTree => Ok(BasicMerkNode),
         }
     }
 

@@ -104,6 +104,9 @@ impl CostSize for TreeType {
             TreeType::BigSumTree => BIG_SUM_TREE_COST_SIZE,
             TreeType::CountTree => COUNT_TREE_COST_SIZE,
             TreeType::CountSumTree => COUNT_SUM_TREE_COST_SIZE,
+            // List mode: treat like normal tree
+            #[cfg(feature = "list_mode")]
+            TreeType::ListTree => TREE_COST_SIZE,
         }
     }
 }
