@@ -6,7 +6,7 @@ use grovedb_merk::{
         Query,
     },
     tree::{combine_hash, value_hash},
-    CryptoHash, TreeFeatureType, TreeType,
+    CryptoHash, TreeFeatureType,
 };
 use grovedb_version::{
     check_grovedb_v0, version::GroveVersion, TryFromVersioned, TryIntoVersioned,

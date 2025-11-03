@@ -109,10 +109,10 @@ where
         let key = tree.key().to_vec();
         let value = tree.value_as_slice().to_vec();
         let value_hash = *tree.value_hash(); // Copy the value hash
-        let kv_hash = *tree.inner.kv.hash(); // Get the kv_hash from the original tree
         
         #[cfg(test)]
         {
+            let kv_hash = *tree.inner.kv.hash(); // Get the kv_hash from the original tree
             let node_hash = tree.hash().value;
             eprintln!("[NAVIGATE] Node in original tree: key={:?}, value_hash={:?}, kv_hash={:?}, node_hash={:?}", 
                 String::from_utf8_lossy(&key), value_hash, kv_hash, node_hash);
@@ -151,7 +151,7 @@ where
         // Extract child hashes - MUST recompute without parent_key for proofs!
         // The cached hash in the Link was computed WITH parent_key, but proofs use parent_key=None
         let left_child_info = if has_left_link {
-            let mut left_walker = cost_return_on_error!(
+            let left_walker = cost_return_on_error!(
                 &mut cost,
                 self.walk(true, None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version)
             ).expect("Left link exists but walk failed");
@@ -165,7 +165,7 @@ where
         };
         
         let right_child_info = if has_right_link {
-            let mut right_walker = cost_return_on_error!(
+            let right_walker = cost_return_on_error!(
                 &mut cost,
                 self.walk(false, None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version)
             ).expect("Right link exists but walk failed");
@@ -425,7 +425,7 @@ pub fn verify_positional_proof(
     expected_root_hash: CryptoHash,
     grove_version: &GroveVersion,
 ) -> CostResult<PositionalProofResult, Error> {
-    let mut cost = OperationCost::default();
+    let cost = OperationCost::default();
 
     // Decode the proof - Decoder is an Iterator that returns Result<Op, Error>
     let decoder = Decoder::new(proof_bytes);
@@ -448,7 +448,7 @@ fn verify_positional_proof_internal(
     proof: LinkedList<Op>,
     position: u64,
     expected_root_hash: CryptoHash,
-    grove_version: &GroveVersion,
+    _grove_version: &GroveVersion,
 ) -> Result<PositionalProofResult, Error> {
     #[cfg(test)]
     eprintln!("\n[VERIFY] Starting verification for position {}", position);
@@ -469,9 +469,9 @@ fn verify_positional_proof_internal(
         eprintln!("[VERIFY] Scanning proof for node at position {}", position);
         
         // First pass: collect all KV nodes with their context
-        for (i, op) in proof.iter().enumerate() {
+        for op in proof.iter() {
             #[cfg(test)]
-            eprintln!("[VERIFY] Op {}: {:?}", i, match op {
+            eprintln!("[VERIFY] Op: {:?}", match op {
                 Op::Push(Node::KVValueHashWithSubtreeSize(k, _, _, s)) => 
                     format!("Push(KVValueHashWithSubtreeSize(key={:?}, size={}))", String::from_utf8_lossy(k), s),
                 Op::Push(Node::KVWithSubtreeSize(k, _, s)) => 
@@ -508,27 +508,27 @@ fn verify_positional_proof_internal(
         
         if leaf_nodes.len() == 1 {
             // Perfect - exactly one leaf node, this must be the target
-            let (key, value, size) = leaf_nodes[0];
+            let (key, value, _size) = leaf_nodes[0];
             found_target = Some((key.clone(), value.clone()));
             
             #[cfg(test)]
             eprintln!("[VERIFY] Found unique leaf node as target: key={:?}, size={}", 
-                String::from_utf8_lossy(key), size);
+                String::from_utf8_lossy(key), _size);
         } else if !leaf_nodes.is_empty() {
             // Multiple leaf nodes - this shouldn't happen, but take the first one
-            let (key, value, size) = leaf_nodes[0];
+            let (key, value, _size) = leaf_nodes[0];
             found_target = Some((key.clone(), value.clone()));
             
             #[cfg(test)]
             eprintln!("[VERIFY] Multiple leaf nodes found ({}), using first: key={:?}, size={}", 
-                leaf_nodes.len(), String::from_utf8_lossy(key), size);
-        } else if let Some((key, value, size)) = nodes.first() {
+                leaf_nodes.len(), String::from_utf8_lossy(key), _size);
+        } else if let Some((key, value, _size)) = nodes.first() {
             // No leaf nodes (might be proving root of tree with children)
             found_target = Some((key.clone(), value.clone()));
             
             #[cfg(test)]
             eprintln!("[VERIFY] No leaf nodes, using first KV node as target: key={:?}, size={}", 
-                String::from_utf8_lossy(key), size);
+                String::from_utf8_lossy(key), _size);
         }
         
         found_target.ok_or_else(|| {

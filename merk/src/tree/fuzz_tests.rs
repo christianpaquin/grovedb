@@ -1,6 +1,9 @@
 //! Fuzz tests
+//! 
+//! NOTE: These tests are currently disabled as they need updating for the new API
+//! that requires GroveVersion parameter and updated Op types.
 
-#![cfg(tests)]
+#![cfg(all(test, feature = "minimal", feature = "fuzz_tests_disabled"))]
 
 #[cfg(feature = "minimal")]
 use std::{cell::RefCell, collections::BTreeMap};

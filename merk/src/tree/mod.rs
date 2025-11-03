@@ -415,7 +415,7 @@ impl TreeNode {
     /// assert_eq!(key, my_uuid);
     /// ```
     pub fn insert_at_position_with_key(
-        mut self,
+        self,
         position: u64,
         key: Vec<u8>,
         value: Vec<u8>,
@@ -521,7 +521,7 @@ impl TreeNode {
                 
                 // Detach both children
                 let (node, maybe_left) = node.detach(true);
-                let (node, maybe_right) = node.detach(false);
+                let (_node, maybe_right) = node.detach(false);
                 
                 // Merge children: if both exist, attach left as the new subtree
                 // and re-attach right to the rightmost node of left
@@ -1203,10 +1203,10 @@ impl TreeNode {
     ///
     /// Returns the new root (x).
     /// Updates parent pointers and subtree_size if in list_mode.
-    pub fn rotate_right(mut self) -> Self {
+    pub fn rotate_right(self) -> Self {
         // Detach left child (x)
-        let (mut y, maybe_x) = self.detach(true);
-        let mut x = maybe_x.expect("rotate_right requires left child");
+        let (y, maybe_x) = self.detach(true);
+        let x = maybe_x.expect("rotate_right requires left child");
         
         // Detach B from x
         let (x, maybe_b) = x.detach(false);
@@ -1241,10 +1241,10 @@ impl TreeNode {
     ///
     /// Returns the new root (y).
     /// Updates parent pointers and subtree_size if in list_mode.
-    pub fn rotate_left(mut self) -> Self {
+    pub fn rotate_left(self) -> Self {
         // Detach right child (y)
-        let (mut x, maybe_y) = self.detach(false);
-        let mut y = maybe_y.expect("rotate_left requires right child");
+        let (x, maybe_y) = self.detach(false);
+        let y = maybe_y.expect("rotate_left requires right child");
         
         // Detach B from y
         let (y, maybe_b) = y.detach(true);
@@ -1277,7 +1277,7 @@ impl TreeNode {
             let left_bf = self.child(true).map_or(0, |c| c.balance_factor());
             if left_bf > 0 {
                 // Left-Right case: rotate left child left first
-                let (mut node, maybe_left) = self.detach(true);
+                let (node, maybe_left) = self.detach(true);
                 let left = maybe_left.expect("balance: left child should exist");
                 let rotated_left = left.rotate_left();
                 let node = node.attach(true, Some(rotated_left));
@@ -1291,7 +1291,7 @@ impl TreeNode {
             let right_bf = self.child(false).map_or(0, |c| c.balance_factor());
             if right_bf < 0 {
                 // Right-Left case: rotate right child right first
-                let (mut node, maybe_right) = self.detach(false);
+                let (node, maybe_right) = self.detach(false);
                 let right = maybe_right.expect("balance: right child should exist");
                 let rotated_right = right.rotate_right();
                 let node = node.attach(false, Some(rotated_right));

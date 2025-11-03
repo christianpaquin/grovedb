@@ -609,9 +609,9 @@ where
     /// be completed in the next iteration.
     pub fn insert_after_key(
         &mut self,
-        target_key: &[u8],
-        value: Vec<u8>,
-        grove_version: &GroveVersion,
+        _target_key: &[u8],
+        _value: Vec<u8>,
+        _grove_version: &GroveVersion,
     ) -> CostResult<Vec<u8>, Error> {
         // Verify this is a list tree
         if self.tree_type != TreeType::ListTree {
@@ -977,7 +977,7 @@ where
     fn apply_list_batch_to_empty_tree(
         &mut self,
         batch: &[ListOp],
-        grove_version: &GroveVersion,
+        _grove_version: &GroveVersion,
     ) -> CostResult<ListBatchResult, Error> {
         let mut cost = OperationCost::default();
         

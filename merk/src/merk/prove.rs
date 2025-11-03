@@ -1,6 +1,6 @@
 use std::collections::LinkedList;
 
-use grovedb_costs::{CostResult, CostsExt, OperationCost};
+use grovedb_costs::{CostResult, CostsExt};
 use grovedb_storage::StorageContext;
 use grovedb_version::version::GroveVersion;
 
