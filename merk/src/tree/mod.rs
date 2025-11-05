@@ -283,7 +283,7 @@ impl TreeNode {
             child_side: None,
             list_mode: true,
             subtree_size: 1,
-            use_parent_pointers: false,
+            use_parent_pointers: true, // List-mode operations require parent pointers for position calculations
         })
     }
 
@@ -299,6 +299,63 @@ impl TreeNode {
     fn clear_parent_pointer(&mut self) {
         self.parent_key = None;
         self.child_side = None;
+    }
+
+    #[cfg(feature = "list_mode")]
+    /// Recursively disable parent pointers for this node and all descendants.
+    /// This is used for standalone Merk trees where parent pointers would cause
+    /// hash mismatches in proofs.
+    pub fn disable_parent_pointers_recursive(&mut self) {
+        self.use_parent_pointers = false;
+        self.parent_key = None;
+        self.child_side = None;
+        
+        // Recursively disable for children (handle all Link types that have trees in memory)
+        match &mut self.inner.left {
+            Some(Link::Modified { tree, .. }) => {
+                tree.disable_parent_pointers_recursive();
+            }
+            Some(Link::Uncommitted { tree, .. }) => {
+                tree.disable_parent_pointers_recursive();
+            }
+            _ => {} // Reference links are not in memory, will be handled when loaded
+        }
+        match &mut self.inner.right {
+            Some(Link::Modified { tree, .. }) => {
+                tree.disable_parent_pointers_recursive();
+            }
+            Some(Link::Uncommitted { tree, .. }) => {
+                tree.disable_parent_pointers_recursive();
+            }
+            _ => {} // Reference links are not in memory, will be handled when loaded
+        }
+    }
+
+    #[cfg(feature = "list_mode")]
+    /// Recursively enable parent pointers for this node and all descendants.
+    /// This is used for GroveDB nested trees where parent pointers are needed for position computation.
+    pub fn enable_parent_pointers_recursive(&mut self) {
+        self.use_parent_pointers = true;
+        
+        // Recursively enable for children (but don't set parent_key yet - that happens during attach)
+        match &mut self.inner.left {
+            Some(Link::Modified { tree, .. }) => {
+                tree.enable_parent_pointers_recursive();
+            }
+            Some(Link::Uncommitted { tree, .. }) => {
+                tree.enable_parent_pointers_recursive();
+            }
+            _ => {}
+        }
+        match &mut self.inner.right {
+            Some(Link::Modified { tree, .. }) => {
+                tree.enable_parent_pointers_recursive();
+            }
+            Some(Link::Uncommitted { tree, .. }) => {
+                tree.enable_parent_pointers_recursive();
+            }
+            _ => {}
+        }
     }
 
     #[cfg(feature = "list_mode")]
@@ -1067,16 +1124,23 @@ impl TreeNode {
                 let left_hash = self.child_hash(true);
                 let right_hash = self.child_hash(false);
                 let size = self.subtree_size();
-                eprintln!("[TREE_HASH] Computing hash: kv_hash={:?}, left={:?}, right={:?}, size={}, parent_key={:?}", 
-                    kv_hash, left_hash, right_hash, size, self.parent_key);
+                eprintln!("[TREE_HASH] Computing hash: kv_hash={:?}, left={:?}, right={:?}, size={}, parent_key={:?}, use_parent_pointers={}", 
+                    kv_hash, left_hash, right_hash, size, self.parent_key, self.use_parent_pointers);
             }
+            
+            // Only include parent_key in hash if use_parent_pointers is enabled
+            let parent_key_for_hash = if self.use_parent_pointers {
+                &self.parent_key
+            } else {
+                &None
+            };
             
             return node_hash_list_mode(
                 self.inner.kv.hash(),
                 self.child_hash(true),
                 self.child_hash(false),
                 self.subtree_size(),
-                &self.parent_key,
+                parent_key_for_hash,
             );
         }
         node_hash(
@@ -2703,10 +2767,15 @@ mod test {
         // Verify parent pointers remain correct after rotations
         
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
+        tree.enable_parent_pointers_recursive(); // Enable parent pointers for this test
+        
         let (new_tree, _) = tree.insert_at_position(1, vec![2]).unwrap().unwrap();
-        tree = new_tree;
+        let mut tree = new_tree;
+        tree.enable_parent_pointers_recursive();
+        
         let (new_tree, _) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
-        tree = new_tree;
+        let mut tree = new_tree;
+        tree.enable_parent_pointers_recursive();
         
         // After balancing, tree structure is:
         //     2
