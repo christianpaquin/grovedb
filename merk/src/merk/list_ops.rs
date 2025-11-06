@@ -1024,6 +1024,13 @@ where
             None
         };
 
+        // For standalone Merk, disable parent pointers before committing
+        // This ensures correct hashing for positional proofs
+        #[cfg(feature = "list_mode")]
+        if self.merk_type == MerkType::StandaloneMerk {
+            tree.disable_parent_pointers_recursive();
+        }
+
         // Set new tree
         self.tree.set(Some(tree));
 

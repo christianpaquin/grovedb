@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Merk Collaborative Editor</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        max-width: 800px;
+        width: 100%;
+        overflow: hidden;
+      }
+
+      .header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 24px;
+      }
+
+      .header h1 {
+        font-size: 28px;
+        margin-bottom: 8px;
+      }
+
+      .header p {
+        opacity: 0.9;
+        font-size: 14px;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 24px;
+        background: #f7fafc;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .status-indicator {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #48bb78;
+        animation: pulse 2s infinite;
+      }
+
+      .status-indicator.disconnected {
+        background: #f56565;
+        animation: none;
+      }
+
+      @keyframes pulse {
+        0%, 100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+
+      .status-text {
+        font-size: 14px;
+        color: #4a5568;
+      }
+
+      .hash-display {
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        color: #718096;
+        margin-left: auto;
+      }
+
+      .editor-container {
+        padding: 24px;
+      }
+
+      #editor {
+        width: 100%;
+        min-height: 300px;
+        padding: 16px;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        font-family: 'Courier New', monospace;
+        font-size: 16px;
+        line-height: 1.6;
+        resize: vertical;
+        transition: border-color 0.2s;
+      }
+
+      #editor:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 16px;
+        padding: 24px;
+        background: #f7fafc;
+        border-top: 1px solid #e2e8f0;
+      }
+
+      .stat {
+        text-align: center;
+      }
+
+      .stat-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #2d3748;
+      }
+
+      .stat-label {
+        font-size: 12px;
+        color: #718096;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-top: 4px;
+      }
+
+      .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: white;
+        padding: 16px 24px;
+        border-radius: 8px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        display: none;
+        animation: slideIn 0.3s ease-out;
+      }
+
+      .notification.show {
+        display: block;
+      }
+
+      @keyframes slideIn {
+        from {
+          transform: translateX(400px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+
+      .notification.error {
+        border-left: 4px solid #f56565;
+      }
+
+      .notification.success {
+        border-left: 4px solid #48bb78;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🌳 Merk Collaborative Editor</h1>
+        <p>Text editing with cryptographic proof verification</p>
+      </div>
+
+      <div class="status">
+        <div class="status-indicator" id="status-indicator"></div>
+        <span class="status-text" id="status-text">Connecting...</span>
+        <span class="hash-display" id="root-hash">Root: —</span>
+      </div>
+
+      <div class="editor-container">
+        <textarea id="editor" placeholder="Start typing... Your edits are verified with Merkle proofs!"></textarea>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value" id="char-count">0</div>
+          <div class="stat-label">Characters</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="proof-count">0</div>
+          <div class="stat-label">Proofs Verified</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="op-count">0</div>
+          <div class="stat-label">Operations</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notification" id="notification"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

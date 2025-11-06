@@ -311,23 +311,66 @@ impl TreeNode {
         self.child_side = None;
         
         // Recursively disable for children (handle all Link types that have trees in memory)
-        match &mut self.inner.left {
-            Some(Link::Modified { tree, .. }) => {
-                tree.disable_parent_pointers_recursive();
+        // We need to handle Uncommitted and Loaded links specially because they have cached hashes
+        // that were computed with parent pointers enabled
+        match self.inner.left.take() {
+            Some(Link::Modified { tree: mut child_tree, pending_writes, child_heights }) => {
+                child_tree.disable_parent_pointers_recursive();
+                self.inner.left = Some(Link::Modified {
+                    tree: child_tree,
+                    pending_writes,
+                    child_heights,
+                });
             }
-            Some(Link::Uncommitted { tree, .. }) => {
+            Some(Link::Uncommitted { mut tree, child_heights, .. }) => {
                 tree.disable_parent_pointers_recursive();
+                // Convert Uncommitted to Modified since hash needs recomputation
+                self.inner.left = Some(Link::Modified {
+                    pending_writes: 1,
+                    child_heights,
+                    tree,
+                });
             }
-            _ => {} // Reference links are not in memory, will be handled when loaded
+            Some(Link::Loaded { mut tree, child_heights, .. }) => {
+                tree.disable_parent_pointers_recursive();
+                // Convert Loaded to Modified since hash needs recomputation
+                self.inner.left = Some(Link::Modified {
+                    pending_writes: 1,
+                    child_heights,
+                    tree,
+                });
+            }
+            other => self.inner.left = other, // Reference or None - no action needed
         }
-        match &mut self.inner.right {
-            Some(Link::Modified { tree, .. }) => {
-                tree.disable_parent_pointers_recursive();
+        
+        match self.inner.right.take() {
+            Some(Link::Modified { tree: mut child_tree, pending_writes, child_heights }) => {
+                child_tree.disable_parent_pointers_recursive();
+                self.inner.right = Some(Link::Modified {
+                    tree: child_tree,
+                    pending_writes,
+                    child_heights,
+                });
             }
-            Some(Link::Uncommitted { tree, .. }) => {
+            Some(Link::Uncommitted { mut tree, child_heights, .. }) => {
                 tree.disable_parent_pointers_recursive();
+                // Convert Uncommitted to Modified since hash needs recomputation
+                self.inner.right = Some(Link::Modified {
+                    pending_writes: 1,
+                    child_heights,
+                    tree,
+                });
             }
-            _ => {} // Reference links are not in memory, will be handled when loaded
+            Some(Link::Loaded { mut tree, child_heights, .. }) => {
+                tree.disable_parent_pointers_recursive();
+                // Convert Loaded to Modified since hash needs recomputation
+                self.inner.right = Some(Link::Modified {
+                    pending_writes: 1,
+                    child_heights,
+                    tree,
+                });
+            }
+            other => self.inner.right = other, // Reference or None - no action needed
         }
     }
 
@@ -1118,16 +1161,6 @@ impl TreeNode {
     pub fn hash(&self) -> CostContext<CryptoHash> {
         #[cfg(feature = "list_mode")]
         if self.list_mode {
-            #[cfg(test)]
-            {
-                let kv_hash = self.inner.kv.hash();
-                let left_hash = self.child_hash(true);
-                let right_hash = self.child_hash(false);
-                let size = self.subtree_size();
-                eprintln!("[TREE_HASH] Computing hash: kv_hash={:?}, left={:?}, right={:?}, size={}, parent_key={:?}, use_parent_pointers={}", 
-                    kv_hash, left_hash, right_hash, size, self.parent_key, self.use_parent_pointers);
-            }
-            
             // Only include parent_key in hash if use_parent_pointers is enabled
             let parent_key_for_hash = if self.use_parent_pointers {
                 &self.parent_key
