@@ -24,12 +24,12 @@ use document::Document;
 enum ClientMessage {
     #[serde(rename = "insert")]
     Insert { 
-        position: usize, 
-        uuid: String,  // Client-generated UUID
+        target_uuid: Option<String>,  // None = insert at beginning, Some = insert after this UUID
+        uuid: String,  // Client-generated UUID for the new character
         value: char 
     },
     #[serde(rename = "delete")]
-    Delete { position: usize },
+    Delete { uuid: String },  // Delete by UUID (reference-based)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,9 +43,9 @@ enum ServerMessage {
     #[serde(rename = "operation")]
     Operation {
         operation: String, // "insert" or "delete"
-        position: usize,
-        uuid: Option<String>,
-        value: Option<char>,
+        target_uuid: Option<String>, // For insert: UUID inserted after (None = beginning)
+        uuid: String,  // UUID of the character
+        value: Option<char>,  // For insert operations
         root_hash: String,
         proof: String, // base64-encoded proof
     },
@@ -220,14 +220,23 @@ async fn handle_client_message(
     let mut doc = state.document.lock().await;
 
     let server_msg = match msg {
-        ClientMessage::Insert { position, uuid: uuid_str, value } => {
+        ClientMessage::Insert { target_uuid, uuid: uuid_str, value } => {
             // Parse the client-provided UUID
             let uuid = uuid::Uuid::parse_str(&uuid_str)
                 .map_err(|e| anyhow!("Invalid UUID: {}", e))?;
             let uuid_bytes = uuid.as_bytes().to_vec();
 
-            // Apply insert operation with client's UUID
-            let (actual_uuid, root_hash, proof) = doc.insert(position, uuid_bytes, value)?;
+            // Parse target UUID if provided
+            let target_uuid_bytes = if let Some(target_str) = &target_uuid {
+                let target_uuid = uuid::Uuid::parse_str(target_str)
+                    .map_err(|e| anyhow!("Invalid target UUID: {}", e))?;
+                Some(target_uuid.as_bytes().to_vec())
+            } else {
+                None
+            };
+
+            // Apply insert operation with reference-based approach
+            let (actual_uuid, root_hash, proof) = doc.insert_after(target_uuid_bytes, uuid_bytes, value)?;
 
             // Encode proof as base64
             let proof_base64 = general_purpose::STANDARD.encode(&proof);
@@ -243,8 +252,8 @@ async fn handle_client_message(
             let changelog_entry = ChangelogEntry {
                 op_index,
                 operation: "insert".to_string(),
-                position,
-                uuid: Some(uuid_str.clone()),
+                target_uuid: target_uuid.clone(),
+                uuid: uuid_str.clone(),
                 value: Some(value),
                 proof: proof_base64.clone(),
                 new_root_hash: root_hash_hex.clone(),
@@ -257,23 +266,28 @@ async fn handle_client_message(
 
             ServerMessage::Operation {
                 operation: "insert".to_string(),
-                position,
-                uuid: Some(uuid_str),
+                target_uuid,
+                uuid: uuid_str,
                 value: Some(value),
                 root_hash: root_hash_hex,
                 proof: proof_base64,
             }
         }
-        ClientMessage::Delete { position } => {
-            // Apply delete operation
-            let (uuid, root_hash, proof) = doc.delete(position)?;
+        ClientMessage::Delete { uuid: uuid_str } => {
+            // Parse the UUID
+            let uuid = uuid::Uuid::parse_str(&uuid_str)
+                .map_err(|e| anyhow!("Invalid UUID: {}", e))?;
+            let uuid_bytes = uuid.as_bytes().to_vec();
+
+            // Apply delete operation (reference-based: delete by UUID)
+            let (deleted_uuid, root_hash, proof) = doc.delete_by_uuid(uuid_bytes)?;
 
             // Encode proof as base64
             let proof_base64 = general_purpose::STANDARD.encode(&proof);
 
             // Convert UUID bytes to string
             let uuid_str = uuid::Uuid::from_bytes(
-                uuid.as_slice().try_into().unwrap()
+                deleted_uuid.as_slice().try_into().unwrap()
             ).to_string();
             
             let root_hash_hex = hex::encode(root_hash);
@@ -282,8 +296,8 @@ async fn handle_client_message(
             let changelog_entry = ChangelogEntry {
                 op_index,
                 operation: "delete".to_string(),
-                position,
-                uuid: Some(uuid_str.clone()),
+                target_uuid: None,
+                uuid: uuid_str.clone(),
                 value: None,
                 proof: proof_base64.clone(),
                 new_root_hash: root_hash_hex.clone(),
@@ -296,8 +310,8 @@ async fn handle_client_message(
 
             ServerMessage::Operation {
                 operation: "delete".to_string(),
-                position,
-                uuid: Some(uuid_str),
+                target_uuid: None,
+                uuid: uuid_str,
                 value: None,
                 root_hash: root_hash_hex,
                 proof: proof_base64,
@@ -326,8 +340,8 @@ use std::fs::OpenOptions;
 struct ChangelogEntry {
     op_index: u64,
     operation: String, // "insert" or "delete"
-    position: usize,
-    uuid: Option<String>,
+    target_uuid: Option<String>, // For insert: UUID inserted after (None = beginning)
+    uuid: String, // UUID of the character being inserted/deleted
     value: Option<char>,
     proof: String, // base64-encoded Merkle proof
     new_root_hash: String,

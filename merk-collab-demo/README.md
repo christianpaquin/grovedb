@@ -1,23 +1,32 @@
 # Merk Collaborative Editing Demo
 
-Real-time collaborative text editor demonstrating **"Text Without CRDTs"** using Merkle tree positional operations with audit trail.
+Real-time collaborative text editor demonstrating **Matt Weidner's "Text Without CRDTs"** using reference-based Merkle tree operations with cryptographic audit trail.
 
-**Status**: ✅ **Fully functional!** Server and client work end-to-end. Type in one browser tab, see updates in all tabs.
+**Status**: ✅ **Fully functional!** Server and client work end-to-end with zero-latency typing. Type in one browser tab, see updates instantly in all tabs.
+
+## Key Features
+
+✅ **Zero-Latency Typing** - Characters appear immediately (optimistic updates)  
+✅ **Reference-Based Operations** - Operations reference UUIDs, not positions  
+✅ **Client-Controlled UUIDs** - Enables true optimistic updates  
+✅ **Tombstone Deletions** - Deleted characters remain in tree for consistency  
+✅ **Merkle Proof Audit Trail** - Every operation is cryptographically verifiable  
+✅ **Independent Auditor** - Verify server integrity without trusting it  
 
 ## Architecture Overview
 
-This demo shows how to build a collaborative editor where:
-- **Clients** sign their operations (comments indicate where real signatures would go)
-- **Clients** verify other users' signatures (not Merkle proofs)
+This demo implements [Matt Weidner's "Text Without CRDTs"](https://mattweidner.com/2025/05/21/text-without-crdts.html) design:
+
+- **Clients** generate UUIDs locally and show changes immediately (zero latency!)
+- **Operations** reference content by UUID, not position (resilient to concurrent edits)
 - **Server** maintains the authoritative Merkle tree (using Merk with `list_mode`)
 - **Server** generates Merkle proofs and publishes them to an audit changelog
-- **Server** broadcasts operations with new root hash to all clients
 - **Auditor** can independently verify server behavior by checking the changelog
 - **No CRDTs needed** - server is the source of truth for operation ordering
 
 ## Trust Model
 
-1. **Client ↔ Client**: Users trust each other via signatures (would be Ed25519 or similar)
+1. **Client → Client**: Users trust each other via signatures (would be Ed25519 or similar)
 2. **Client → Server**: Clients trust server for operation ordering (server is authoritative)
 3. **Server → Auditor**: Auditors verify server integrity via Merkle proofs in changelog
 4. **No client-side proof verification**: Clients don't verify Merkle proofs (simpler, faster)
@@ -31,22 +40,23 @@ This demo shows how to build a collaborative editor where:
 │  │  Client (TypeScript)                               │     │
 │  │  - Simple list: [(uuid, 'H'), (uuid, 'e'), ...]   │     │
 │  │  - Generates UUIDs locally (optimistic updates)    │     │
+│  │  - Reference-based ops: InsertAfterKeyWithKey      │     │
 │  │  - Signs operations (placeholder comments)         │     │
-│  │  - Verifies other users' signatures (not proofs)   │     │
 │  │  - Tracks root hash for consistency reference      │     │
 │  └────────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────┘
                             ↕ WebSocket
-                    [op, signature, new_root_hash]
+              [op: insert_after(target_uuid, uuid, char)]
 ┌─────────────────────────────────────────────────────────────┐
 │                    Server (Rust + Axum)                      │
 │  ┌────────────────────────────────────────────────────┐     │
 │  │  Merk Database (TreeType::ListTree)                │     │
 │  │  - Full Merkle tree with client UUIDs              │     │
+│  │  - Reference-based: InsertAfterKeyWithKey          │     │
+│  │  - Tombstone deletions (value=[deleted, char])     │     │
 │  │  - Generates proofs for all operations             │     │
-│  │  - Maintains authoritative state                   │     │
 │  │  - Broadcasts to all connected clients             │     │
-│  │  - Publishes changelog for audit                   │     │
+│  │  - Publishes changelog for independent audit       │     │
 │  └────────────────────────────────────────────────────┘     │
 └─────────────────────────────────────────────────────────────┘
                             ↓ changelog.jsonl
@@ -146,6 +156,24 @@ Open http://localhost:5173 in multiple browser tabs and start typing!
 - Auditor can independently verify entire history
 - **Proofs ensure server hasn't tampered with tree**
 - Clients don't verify proofs (simpler, faster, trust server ordering)
+
+### Tombstone Architecture
+Following Matt Weidner's ["Text Without CRDTs"](https://mattweidner.com/2025/05/21/text-without-crdts.html) design:
+
+- **Deletions don't remove items** - they mark them as deleted (tombstones)
+- **Value format**: `[deleted_flag, char_byte]` (2 bytes per character)
+  - `deleted_flag`: 0 = active, 1 = deleted
+  - `char_byte`: the character value
+- **UUIDs persist** - deleted items keep their UUID so other clients can reference them
+- **Positions stable** - tombstones maintain tree positions for concurrent operations
+- **Delete operation**: Delete + Re-insert with same UUID but marked as deleted
+- **Display**: Clients filter out tombstones when showing content
+
+**Why tombstones matter for collaboration:**
+1. Client A deletes character at position 5 (while offline)
+2. Client B inserts after position 5 (while offline)  
+3. When both sync: Client B's insert can still reference position 5 because the tombstone exists
+4. Without tombstones: Position 5 disappears, making Client B's operation ambiguous
 
 ### Security Properties
 - **User Authentication**: Signatures prove who authored each operation (placeholder comments)

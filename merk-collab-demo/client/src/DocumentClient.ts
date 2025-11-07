@@ -8,8 +8,8 @@ export interface InitialMessage {
 export interface OperationMessage {
   type: 'operation';
   operation: 'insert' | 'delete';
-  position: number;
-  uuid?: string;
+  target_uuid?: string;  // For insert: UUID inserted after (undefined = beginning)
+  uuid: string;  // UUID of the character
   value?: string;
   root_hash: string;
   proof: string;
@@ -24,9 +24,9 @@ export type ServerMessage = InitialMessage | OperationMessage | ErrorMessage;
 
 export interface ClientMessage {
   type: 'insert' | 'delete';
-  position: number;
-  uuid?: string;  // Client-generated UUID for inserts
-  value?: string;
+  target_uuid?: string;  // For insert: UUID to insert after (undefined = beginning)
+  uuid: string;  // UUID of the character being inserted/deleted
+  value?: string;  // For insert operations
 }
 
 export interface DocumentState {
@@ -133,7 +133,7 @@ export class DocumentClient {
     this.opCount++;
 
     // Apply the operation locally
-    if (msg.operation === 'insert' && msg.uuid && msg.value) {
+    if (msg.operation === 'insert' && msg.value) {
       // Check if we already have this UUID (our own optimistic update)
       const existingIndex = this.state.content.findIndex(([uuid, _]) => uuid === msg.uuid);
       
@@ -141,8 +141,17 @@ export class DocumentClient {
       
       if (existingIndex === -1) {
         // This is from another client, insert it
-        console.log('[DocumentClient] Inserting from another client at position', msg.position);
-        this.state.content.splice(msg.position, 0, [msg.uuid, msg.value]);
+        // Find the position based on target_uuid
+        let insertPosition = 0;
+        if (msg.target_uuid) {
+          const targetIndex = this.state.content.findIndex(([uuid, _]) => uuid === msg.target_uuid);
+          if (targetIndex !== -1) {
+            insertPosition = targetIndex + 1; // Insert after the target
+          }
+        }
+        
+        console.log('[DocumentClient] Inserting from another client at position', insertPosition);
+        this.state.content.splice(insertPosition, 0, [msg.uuid, msg.value]);
         console.log('[DocumentClient] State after insert:', JSON.stringify(this.state.content, null, 2));
       } else {
         // This is confirmation of our own operation
@@ -150,13 +159,13 @@ export class DocumentClient {
         // No need to do anything, we already have it optimistically
       }
     } else if (msg.operation === 'delete') {
-      // For delete, find and remove by position
-      // We may have already removed it optimistically
-      if (msg.position < this.state.content.length) {
-        console.log('[DocumentClient] Deleting at position', msg.position);
-        this.state.content.splice(msg.position, 1);
+      // Find and remove by UUID
+      const deleteIndex = this.state.content.findIndex(([uuid, _]) => uuid === msg.uuid);
+      if (deleteIndex !== -1) {
+        console.log('[DocumentClient] Deleting UUID', msg.uuid, 'at index', deleteIndex);
+        this.state.content.splice(deleteIndex, 1);
       } else {
-        console.log('[DocumentClient] Delete position out of bounds, already removed');
+        console.log('[DocumentClient] Delete UUID not found, already removed optimistically');
       }
     }
 
@@ -180,7 +189,7 @@ export class DocumentClient {
     });
   }
 
-  // Send an insert operation to the server
+  // Send an insert operation to the server (reference-based)
   insert(position: number, char: string) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.onError('Not connected to server');
@@ -190,8 +199,12 @@ export class DocumentClient {
     // Generate UUID for this character
     const uuid = this.generateUuid();
 
+    // Find the UUID of the character before this position (target_uuid)
+    // If position is 0, target_uuid is undefined (insert at beginning)
+    const target_uuid = position > 0 ? this.state.content[position - 1][0] : undefined;
+
     // In a production system, sign the operation here:
-    // const operation = { type: 'insert', position, uuid, value: char };
+    // const operation = { type: 'insert', target_uuid, uuid, value: char };
     // const signature = await signOperation(userPrivateKey, operation);
     // Then include signature in the message sent to server
     
@@ -201,7 +214,7 @@ export class DocumentClient {
 
     const msg: ClientMessage = {
       type: 'insert',
-      position,
+      target_uuid,
       uuid,
       value: char,
       // signature would go here in real system
@@ -211,27 +224,33 @@ export class DocumentClient {
     this.ws.send(JSON.stringify(msg));
   }
 
-  // Send a delete operation to the server
+  // Send a delete operation to the server (reference-based: delete by UUID)
   delete(position: number) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.onError('Not connected to server');
       return;
     }
 
+    // Get the UUID of the character at this position
+    if (position >= this.state.content.length) {
+      this.onError('Delete position out of bounds');
+      return;
+    }
+    
+    const uuid = this.state.content[position][0];
+
     // In a production system, sign the operation here:
-    // const operation = { type: 'delete', position };
+    // const operation = { type: 'delete', uuid };
     // const signature = await signOperation(userPrivateKey, operation);
     // Then include signature in the message sent to server
 
     // Optimistic update: remove from local state immediately
-    if (position < this.state.content.length) {
-      this.state.content.splice(position, 1);
-      this.onStateChange(this.state);
-    }
+    this.state.content.splice(position, 1);
+    this.onStateChange(this.state);
 
     const msg: ClientMessage = {
       type: 'delete',
-      position,
+      uuid,
       // signature would go here in real system
     };
 

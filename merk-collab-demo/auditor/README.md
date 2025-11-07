@@ -52,7 +52,7 @@ cargo run --release -- /tmp/.tmpXXXXXX/changelog.jsonl --stop-on-error
 
 ```
 ╔═══════════════════════════════════════════════════════════════╗
-║         Merk Collaborative Editor - Changelog Auditor        ║
+║         Merk Collaborative Editor - Changelog Auditor         ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 Changelog: /tmp/.tmpabcdef/changelog.jsonl

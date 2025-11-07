@@ -147,6 +147,7 @@ pub enum ListOp {
     },
 
     /// Insert a value immediately after the element with the given key.
+    /// Generates a random UUID for the new element.
     /// Used for collaborative editing where you know the UUID of an element.
     ///
     /// # Arguments
@@ -160,8 +161,40 @@ pub enum ListOp {
     /// This operation requires computing the position of target_key first,
     /// which involves traversing the parent chain. In batch context, we can
     /// optimize by caching position lookups.
+    /// 
+    /// Internally, this generates a UUID and calls InsertAfterKeyWithKey.
     InsertAfterKey {
         target_key: Vec<u8>,
+        value: Vec<u8>,
+    },
+
+    /// Insert a value with a client-provided key immediately after the element with the given key.
+    ///
+    /// # Arguments
+    /// * `target_key` - UUID key of the element to insert after
+    /// * `key` - Client-provided UUID key for the new element (enables optimistic updates)
+    /// * `value` - The value to insert
+    ///
+    /// # Use Case
+    /// Client generates UUID locally, shows character immediately (zero latency),
+    /// then sends operation to server with same UUID for eventual consistency.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Client types 'i' after 'H'
+    /// let uuid_i = Uuid::new_v4();
+    /// client.show_char_optimistically(uuid_i, 'i'); // Instant feedback!
+    /// 
+    /// let op = ListOp::InsertAfterKeyWithKey {
+    ///     target_key: uuid_h,
+    ///     key: uuid_i.as_bytes().to_vec(),
+    ///     value: vec![b'i'],
+    /// };
+    /// client.send_to_server(op); // Eventual consistency
+    /// ```
+    InsertAfterKeyWithKey {
+        target_key: Vec<u8>,
+        key: Vec<u8>,
         value: Vec<u8>,
     },
 }
@@ -903,6 +936,18 @@ where
                     }
                     current_size += 1; // Insert increases size
                 }
+                ListOp::InsertAfterKeyWithKey { target_key, key, .. } => {
+                    // Verify target_key exists in tree (accounting for previous operations)
+                    if !keys_in_tree.contains(target_key) {
+                        // Restore tree before returning error
+                        self.tree.set(Some(tree));
+                        return Err(Error::InvalidInputError(
+                            "InsertAfterKeyWithKey target_key not found in tree"
+                        )).wrap_with_cost(cost);
+                    }
+                    keys_in_tree.insert(key.clone());
+                    current_size += 1; // Insert increases size
+                }
             }
         }
 
@@ -970,13 +1015,38 @@ where
                 }
                 
                 ListOp::InsertAfterKey { target_key, value } => {
-                    // For InsertAfterKey, we need to:
-                    // 1. Find the node with target_key
-                    // 2. Compute its position via parent chain
-                    // 3. Insert at position + 1
+                    // InsertAfterKey generates a server-side UUID and delegates to InsertAfterKeyWithKey
+                    let generated_key = uuid::Uuid::new_v4().as_bytes().to_vec();
                     
-                    // We'll need a fetch closure that can access the current tree state
-                    // Store the tree temporarily so we can build a fetch closure
+                    // Build node map for fetch closure
+                    let temp_tree = tree;
+                    let mut node_map = std::collections::HashMap::new();
+                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
+                        map.insert(node.key().to_vec(), node.clone());
+                        if let Some(left) = node.child(true) {
+                            collect_nodes(left, map);
+                        }
+                        if let Some(right) = node.child(false) {
+                            collect_nodes(right, map);
+                        }
+                    }
+                    collect_nodes(&temp_tree, &mut node_map);
+                    
+                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    let insert_result = temp_tree.insert_after_key_with_key(target_key, generated_key.clone(), value.clone(), fetch)
+                        .unwrap_add_cost(&mut cost);
+                    let (new_tree, returned_key) = match insert_result {
+                        Ok(result) => result,
+                        Err(e) => return Err(e).wrap_with_cost(cost),
+                    };
+                    result_keys.push(returned_key.clone());
+                    all_new_keys.insert(returned_key);
+                    tree = new_tree;
+                }
+                
+                ListOp::InsertAfterKeyWithKey { target_key, key, value } => {
+                    // Similar to InsertAfterKey but with client-provided key
+                    // This enables optimistic local updates with zero latency
                     let temp_tree = tree;
                     
                     // Create a map of all nodes for the fetch closure
@@ -992,20 +1062,24 @@ where
                     }
                     collect_nodes(&temp_tree, &mut node_map);
                     
-                    // Now call insert_after_key with the fetch closure
+                    // Call insert_after_key_with_key with the fetch closure
                     let fetch = |k: &[u8]| node_map.get(k).cloned();
-                    let insert_result = temp_tree.insert_after_key(target_key, value.clone(), fetch)
-                        .unwrap_add_cost(&mut cost);
+                    let insert_result = temp_tree.insert_after_key_with_key(
+                        target_key,
+                        key.clone(),
+                        value.clone(),
+                        fetch
+                    ).unwrap_add_cost(&mut cost);
                     
-                    let (new_tree, generated_key) = match insert_result {
+                    let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
                         Err(e) => {
                             return Err(e).wrap_with_cost(cost);
                         }
                     };
                     
-                    result_keys.push(generated_key.clone());
-                    all_new_keys.insert(generated_key);
+                    result_keys.push(returned_key.clone());
+                    all_new_keys.insert(returned_key);
                     tree = new_tree;
                 }
             }
@@ -1132,6 +1206,9 @@ where
                     tree = new_tree;
                 }
                 ListOp::InsertAfterKey { target_key, value } => {
+                    // InsertAfterKey generates a server-side UUID and delegates to InsertAfterKeyWithKey
+                    let generated_key = uuid::Uuid::new_v4().as_bytes().to_vec();
+                    
                     // Build node map for fetch closure
                     let temp_tree = tree;
                     let mut node_map = std::collections::HashMap::new();
@@ -1147,14 +1224,40 @@ where
                     collect_nodes(&temp_tree, &mut node_map);
                     
                     let fetch = |k: &[u8]| node_map.get(k).cloned();
-                    let insert_result = temp_tree.insert_after_key(target_key, value.clone(), fetch)
+                    let insert_result = temp_tree.insert_after_key_with_key(target_key, generated_key.clone(), value.clone(), fetch)
                         .unwrap_add_cost(&mut cost);
-                    let (new_tree, generated_key) = match insert_result {
+                    let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
                         Err(e) => return Err(e).wrap_with_cost(cost),
                     };
-                    result_keys.push(generated_key.clone());
-                    all_new_keys.insert(generated_key);
+                    result_keys.push(returned_key.clone());
+                    all_new_keys.insert(returned_key);
+                    tree = new_tree;
+                }
+                ListOp::InsertAfterKeyWithKey { target_key, key, value } => {
+                    // Build node map for fetch closure
+                    let temp_tree = tree;
+                    let mut node_map = std::collections::HashMap::new();
+                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
+                        map.insert(node.key().to_vec(), node.clone());
+                        if let Some(left) = node.child(true) {
+                            collect_nodes(left, map);
+                        }
+                        if let Some(right) = node.child(false) {
+                            collect_nodes(right, map);
+                        }
+                    }
+                    collect_nodes(&temp_tree, &mut node_map);
+                    
+                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    let insert_result = temp_tree.insert_after_key_with_key(target_key, key.clone(), value.clone(), fetch)
+                        .unwrap_add_cost(&mut cost);
+                    let (new_tree, returned_key) = match insert_result {
+                        Ok(result) => result,
+                        Err(e) => return Err(e).wrap_with_cost(cost),
+                    };
+                    result_keys.push(returned_key.clone());
+                    all_new_keys.insert(returned_key);
                     tree = new_tree;
                 }
             }
@@ -1647,4 +1750,59 @@ mod tests {
         // This demonstrates the power of mixing UUID-based and positional operations
         // in a single atomic batch!
     }
+
+    #[test]
+    fn test_apply_list_batch_insert_after_key_with_key() {
+        // Test InsertAfterKeyWithKey - client provides UUID for optimistic updates
+        let grove_version = GroveVersion::latest();
+        let mut merk = make_list_merk();
+
+        // Initial setup: Insert 'H' at position 0
+        let key_h = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let batch1 = vec![
+            ListOp::InsertAtPositionWithKey { position: 0, key: key_h.clone(), value: vec![b'H'] },
+        ];
+        merk.apply_list_batch(&batch1, &grove_version).unwrap().unwrap();
+
+        // Client generates UUID locally for 'i'
+        let key_i = uuid::Uuid::new_v4().as_bytes().to_vec();
+        
+        // Insert 'i' after 'H' using InsertAfterKeyWithKey with client-provided UUID
+        let batch2 = vec![
+            ListOp::InsertAfterKeyWithKey { 
+                target_key: key_h.clone(), 
+                key: key_i.clone(), 
+                value: vec![b'i'] 
+            },
+        ];
+        let result2 = merk.apply_list_batch(&batch2, &grove_version).unwrap().unwrap();
+        
+        // Verify the returned key matches what we provided
+        assert_eq!(result2.keys.len(), 1);
+        assert_eq!(result2.keys[0], key_i);
+
+        // Client generates UUID locally for '!'
+        let key_exclaim = uuid::Uuid::new_v4().as_bytes().to_vec();
+        
+        // Insert '!' after 'i' using InsertAfterKeyWithKey
+        let batch3 = vec![
+            ListOp::InsertAfterKeyWithKey { 
+                target_key: key_i.clone(), 
+                key: key_exclaim.clone(), 
+                value: vec![b'!'] 
+            },
+        ];
+        let result3 = merk.apply_list_batch(&batch3, &grove_version).unwrap().unwrap();
+        
+        // Verify the returned key matches what we provided
+        assert_eq!(result3.keys.len(), 1);
+        assert_eq!(result3.keys[0], key_exclaim);
+
+        // This demonstrates the zero-latency pattern:
+        // 1. Client generates UUID
+        // 2. Client shows character immediately with that UUID
+        // 3. Server confirms operation with same UUID
+        // 4. No conflict resolution needed!
+    }
 }
+

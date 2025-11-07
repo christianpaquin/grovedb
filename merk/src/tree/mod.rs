@@ -728,6 +728,61 @@ impl TreeNode {
         self.insert_at_position(position + 1, value)
     }
 
+    #[cfg(feature = "list_mode")]
+    /// Insert a new node after the node with target_key, using a client-provided key.
+    ///
+    /// This is a reference-based operation, allowing the client to provide the UUID,
+    /// enabling optimistic local updates: the client can show the new character
+    /// immediately while the server confirms the operation asynchronously.
+    ///
+    /// Requirements:
+    /// - Tree must be in list_mode
+    /// - target_key must exist in the tree
+    /// - fetch must be able to retrieve nodes by key
+    ///
+    /// Algorithm:
+    /// 1. Find the node with target_key using fetch
+    /// 2. Compute its position using compute_position_with_parent_fetch
+    /// 3. Insert new value at position + 1 using insert_at_position_with_key
+    ///
+    /// Returns the updated tree and the client-provided key (for consistency with other insert methods).
+    pub fn insert_after_key_with_key<F>(
+        self,
+        target_key: &[u8],
+        key: Vec<u8>,
+        value: Vec<u8>,
+        mut fetch: F,
+    ) -> CostContext<Result<(Self, Vec<u8>), Error>>
+    where
+        F: FnMut(&[u8]) -> Option<Self>,
+    {
+        if !self.list_mode {
+            return Err(Error::InternalError("insert_after_key_with_key requires list_mode"))
+                .wrap_with_cost(OperationCost::default());
+        }
+
+        // Fetch the target node
+        let target_node = match fetch(target_key) {
+            Some(node) => node,
+            None => {
+                return Err(Error::InternalError("target key not found in tree"))
+                    .wrap_with_cost(OperationCost::default());
+            }
+        };
+
+        // Compute its position
+        let position = match target_node.compute_position_with_parent_fetch(fetch) {
+            Some(pos) => pos,
+            None => {
+                return Err(Error::InternalError("could not compute position for target key"))
+                    .wrap_with_cost(OperationCost::default());
+            }
+        };
+
+        // Insert at position + 1 (after the target) with client-provided key
+        self.insert_at_position_with_key(position + 1, key, value)
+    }
+
     /// the node type
     pub fn node_type(&self) -> NodeType {
         self.inner.kv.feature_type.node_type()
