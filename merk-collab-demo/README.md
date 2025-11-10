@@ -18,11 +18,27 @@ Real-time collaborative text editor demonstrating **Matt Weidner's "Text Without
 This demo implements [Matt Weidner's "Text Without CRDTs"](https://mattweidner.com/2025/05/21/text-without-crdts.html) design:
 
 - **Clients** generate UUIDs locally and show changes immediately (zero latency!)
-- **Operations** reference content by UUID, not position (resilient to concurrent edits)
+- **Protocol** uses reference-based operations (operations reference UUIDs, not positions)
 - **Server** maintains the authoritative Merkle tree (using Merk with `list_mode`)
+- **Implementation** converts UUIDs to positions server-side (hybrid approach for reliability)
 - **Server** generates Merkle proofs and publishes them to an audit changelog
 - **Auditor** can independently verify server behavior by checking the changelog
 - **No CRDTs needed** - server is the source of truth for operation ordering
+
+### Why Hybrid? Protocol vs Implementation
+
+**Protocol level (client ↔ server)**: Reference-based
+- Client sends `target_uuid` (UUID to insert after)
+- Resilient to concurrent edits (positions don't shift)
+- Enables zero-latency typing with client-generated UUIDs
+
+**Implementation level (server internal)**: Position-based
+- Server looks up `target_uuid` in cache to get tree position
+- Uses `InsertAtPositionWithKey` with calculated position
+- More reliable after tombstone operations (delete+reinsert changes tree structure)
+- Avoids fetch closure issues with `InsertAfterKeyWithKey`
+
+**Result**: Best of both worlds - protocol resilience + implementation reliability!
 
 ## Trust Model
 
@@ -84,11 +100,15 @@ TypeScript + Vite application:
 ### 2. `server/` - Rust Backend (✅ Working)
 Axum-based server that:
 - Maintains Merk tree with `list_mode` feature
+- Accepts reference-based operations (client sends `target_uuid`)
+- Maintains character cache for fast UUID→position lookups
+- Converts `target_uuid` to tree position before applying operation
 - Handles insert/delete operations with client-provided UUIDs
 - Generates Merkle proofs using `merk.prove_position()`
 - Broadcasts updates to all clients via WebSocket
 - Uses TempStorage (in-memory) for demo purposes
 - **Publishes changelog file with proofs for audit trail**
+- **Hybrid approach**: Reference-based protocol, position-based implementation
 
 ### 3. `auditor/` - Verification Tool (✅ Implemented)
 Standalone Rust tool that:
@@ -138,17 +158,21 @@ Open http://localhost:5173 in multiple browser tabs and start typing!
 
 ### Operations Flow
 1. User types a character at position N
-2. **[Real system: Client signs operation with user private key]**
-3. Client generates UUID locally and optimistically updates display
-4. Client sends: `{ type: 'insert', position: N, uuid, value: 'char' }`
-5. Server applies to Merk tree with client's UUID
-6. Server generates Merkle proof for audit trail
-7. **Server appends to changelog: `[op_index, op, proof, new_root_hash]`**
-8. Server broadcasts to all clients: `{ type: 'operation', operation: 'insert', position, uuid, value, root_hash }`
-9. **[Real system: Clients verify operation signature from other users]**
-10. Originating client: Sees UUID matches, already has it (no-op)
-11. Other clients: UUID not found, insert at position
-12. All clients update root hash reference
+2. Client generates UUID locally and optimistically updates display
+3. Client finds `target_uuid` (UUID of character at position N-1)
+4. Client sends: `{ type: 'insert', target_uuid: 'previous-char-uuid', uuid: 'new-uuid', value: 'char' }`
+5. **[Real system: Client signs operation with user private key]**
+6. Server looks up `target_uuid` in cache to find tree position
+7. Server applies: `InsertAtPositionWithKey { position: tree_pos, key: uuid, value }`
+8. Server generates Merkle proof for audit trail
+9. **Server appends to changelog: `[op_index, op, target_uuid, uuid, value, proof, new_root_hash]`**
+10. Server broadcasts to all clients: `{ type: 'operation', operation: 'insert', target_uuid, uuid, value, root_hash }`
+11. **[Real system: Clients verify operation signature from other users]**
+12. Originating client: Sees UUID matches, already has it (no-op)
+13. Other clients: UUID not found, look up `target_uuid` position and insert
+14. All clients update root hash reference
+
+**Key insight**: Protocol uses reference-based operations (UUIDs), server converts to positions internally for reliability.
 
 ### Audit Trail
 - Server maintains append-only changelog file

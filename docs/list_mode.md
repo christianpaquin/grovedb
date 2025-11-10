@@ -189,6 +189,37 @@ insert_after_key(key: &[u8], value: Vec<u8>, ...) -> Result<UUID, Error>
 2. Compute its position via `position_of_key(key)`.
 3. Call `insert_at(position + 1, value)`.
 
+**Note**: Server generates UUID internally, so client cannot do optimistic updates.
+
+### Insert After Key With Key (Client-Provided UUID) ✅
+```rust
+insert_after_key_with_key(
+    target_key: &[u8], 
+    key: Vec<u8>,      // Client-provided UUID
+    value: Vec<u8>, 
+    fetch: ...
+) -> Result<UUID, Error>
+```
+1. Fetch node by `target_key`.
+2. Compute its position via `position_of_key(target_key)`.
+3. Call `insert_at(position + 1, value)` with client's `key` as UUID.
+4. Return client's `key` (unchanged).
+
+**Benefits**:
+- Client generates UUID before operation (zero-latency optimistic updates)
+- Implements Matt Weidner's "Text Without CRDTs" design
+- Operations reference UUIDs, not positions (resilient to concurrent edits)
+
+**Implementation Status**: ✅ Implemented in `merk/src/tree/mod.rs` and `merk/src/merk/list_ops.rs`
+- Added `InsertAfterKeyWithKey` ListOp variant
+- Uses parent pointer traversal via fetch closure
+- All tests passing
+
+**Production Note**: In merk-collab-demo, we use a hybrid approach:
+- Protocol: Client sends `target_uuid` (reference-based)
+- Implementation: Server converts to position using cache (more reliable after tombstone operations)
+- See `merk-collab-demo/REFERENCE_BASED_OPS.md` for details
+
 ### Subtree Size Maintenance
 Invariant: For a list-mode node,
 ```

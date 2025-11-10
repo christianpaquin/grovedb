@@ -53,9 +53,32 @@ The merk-collab-demo is **working end-to-end**! You can run the server and clien
 3. **Tamper detection**: Merkle proofs catch server corruption
 4. **Scalability**: Auditors run offline, don't impact real-time performance
 
-### ⚠️ Current Limitations
+### ⚠️ Current Limitations & Design Decisions
 
-#### 1. **Storage Backend** (Server)
+#### 1. **Hybrid Architecture: Reference-Based Protocol + Position-Based Implementation**
+
+**Current approach**: 
+- Protocol uses reference-based operations (client sends `target_uuid`)
+- Server converts to position-based operations internally
+
+**Why hybrid?**:
+- InsertAfterKeyWithKey (pure reference-based) can fail after tombstone operations
+- Delete does `DeleteAtPosition` + `InsertAtPositionWithKey` (creates tombstone)
+- This batch changes tree structure, breaking parent pointer traversal
+- Solution: Use reference-based protocol, convert to positions server-side
+
+**Benefits**:
+- ✅ Protocol is reference-based (resilient to concurrent edits)
+- ✅ Client generates UUIDs (zero-latency typing)
+- ✅ Implementation is reliable (position operations always work)
+- ✅ Cache lookup is fast for demo scale (O(n) but small n)
+
+**For production at scale**:
+- Add UUID→position index (HashMap or BTreeMap)
+- Or: Make InsertAfterKeyWithKey more robust to structural changes
+- Or: Keep hybrid approach (works well, proven reliable)
+
+#### 2. **Storage Backend** (Server)
 
 **Current**: Uses `TempStorage` (in-memory, document reset on server restart)
 
@@ -78,7 +101,7 @@ let storage = RocksDbStorage::default_rocksdb_with_path(path)?;
 - Use message-passing architecture (send operations to dedicated thread)
 - Accept `unsafe impl Send + Sync` (current approach, safe with Mutex protection)
 
-#### 2. **Signature Verification** (Not Implemented)
+#### 3. **Signature Verification** (Not Implemented)
 
 **Current**: Placeholder comments show where crypto would go
 
@@ -94,7 +117,7 @@ let storage = RocksDbStorage::default_rocksdb_with_path(path)?;
 - Crypto libraries add complexity
 - Comments clearly show where it belongs
 
-#### 3. **Multi-Character Operations**
+#### 4. **Multi-Character Operations**
 
 **Current**: Paste is disabled, can only type one character at a time
 
