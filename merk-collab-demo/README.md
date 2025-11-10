@@ -25,20 +25,16 @@ This demo implements [Matt Weidner's "Text Without CRDTs"](https://mattweidner.c
 - **Auditor** can independently verify server behavior by checking the changelog
 - **No CRDTs needed** - server is the source of truth for operation ordering
 
-### Why Hybrid? Protocol vs Implementation
+### Pure Reference-Based Operations
 
 **Protocol level (client ↔ server)**: Reference-based
-- Client sends `target_uuid` (UUID to insert after)
-- Resilient to concurrent edits (positions don't shift)
-- Enables zero-latency typing with client-generated UUIDs
+- Operations include UUIDs: `{ target_uuid, char, uuid }`
+- Resilient to concurrent edits, offline sync
 
-**Implementation level (server internal)**: Position-based
-- Server looks up `target_uuid` in cache to get tree position
-- Uses `InsertAtPositionWithKey` with calculated position
-- More reliable after tombstone operations (delete+reinsert changes tree structure)
-- Avoids fetch closure issues with `InsertAfterKeyWithKey`
-
-**Result**: Best of both worlds - protocol resilience + implementation reliability!
+**Implementation level (server internal)**: Reference-based
+- Direct UUID-based operations (`InsertAfterKeyWithKey`, `UpdateValueByKey`)
+- Position discovery after insertion for proof generation
+- Tombstones via in-place update (no structural changes)
 
 ## Trust Model
 
@@ -172,7 +168,7 @@ Open http://localhost:5173 in multiple browser tabs and start typing!
 13. Other clients: UUID not found, look up `target_uuid` position and insert
 14. All clients update root hash reference
 
-**Key insight**: Protocol uses reference-based operations (UUIDs), server converts to positions internally for reliability.
+**Key insight**: Protocol and implementation both use reference-based operations (UUIDs). Positions are discovered after operations for proof generation only.
 
 ### Audit Trail
 - Server maintains append-only changelog file

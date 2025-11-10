@@ -236,23 +236,23 @@ The core functionality for Matt Weidner's "Text Without CRDTs" design is now **f
 4. **Auditor**: Verifies proofs with reference-based operations
 5. **Zero-Latency Typing**: Characters appear instantly, server confirms with same UUID
 
-### 🎯 Hybrid Architecture Decision
+### 🎯 Pure Reference-Based Architecture
 
-**merk-collab-demo uses a pragmatic hybrid approach:**
+**merk-collab-demo uses pure reference-based operations throughout:**
 
 **Protocol Level (Reference-Based):**
 - Client sends: `{ target_uuid, uuid, value }`
 - Operations reference UUIDs, not positions
 - Resilient to concurrent edits
 
-**Implementation Level (Position-Based):**
-- Server looks up `target_uuid` in cache to get tree position
-- Uses `InsertAtPositionWithKey` with calculated position
-- More reliable after tombstone operations
+**Implementation Level (Reference-Based):**
+- Server uses `InsertAfterKeyWithKey` directly (no position conversion)
+- Deletions use `UpdateValueByKey` for in-place tombstone updates
+- Position discovery after insertion for proof generation
 
-**Why?** InsertAfterKeyWithKey's fetch closure can fail after delete+reinsert operations that create tombstones. The hybrid approach gets the protocol benefits of reference-based operations with the implementation reliability of position-based operations.
+**Why it works now:** UpdateValueByKey enables in-place tombstone updates without tree restructuring. This keeps tree structure stable, allowing InsertAfterKeyWithKey to work reliably after deletions.
 
-See `REFERENCE_BASED_OPS.md` for detailed explanation of this design decision.
+See `REFERENCE_BASED_OPS.md` for detailed explanation of this design.
 
 ### 🚀 Demo Ready
 

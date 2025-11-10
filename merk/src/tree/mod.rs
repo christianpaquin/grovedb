@@ -783,6 +783,107 @@ impl TreeNode {
         self.insert_at_position_with_key(position + 1, key, value)
     }
 
+    #[cfg(feature = "list_mode")]
+    /// Update the value of an existing node identified by key (in-place update).
+    ///
+    /// This operation updates the value without changing the tree structure,
+    /// making it ideal for tombstone deletions in collaborative editing.
+    ///
+    /// Requirements:
+    /// - Tree must be in list_mode
+    /// - key must exist in the tree
+    ///
+    /// Algorithm:
+    /// 1. Recursively traverse tree to find node with matching key
+    /// 2. When found, create new node with updated value
+    /// 3. Reconstruct path back to root with updated node
+    /// 4. Subtree sizes remain unchanged (no structural change)
+    ///
+    /// Benefits:
+    /// - No structural changes (parent pointers remain valid)
+    /// - More efficient than delete+reinsert
+    /// - Enables reliable InsertAfterKeyWithKey after updates
+    ///
+    /// Returns the updated tree and the key.
+    pub fn update_value_by_key<F>(
+        self,
+        key: &[u8],
+        value: Vec<u8>,
+        mut _fetch: F,
+    ) -> CostContext<Result<(Self, Vec<u8>), Error>>
+    where
+        F: FnMut(&[u8]) -> Option<Self>,
+    {
+        if !self.list_mode {
+            return Err(Error::InternalError("update_value_by_key requires list_mode"))
+                .wrap_with_cost(OperationCost::default());
+        }
+
+        // Recursive helper to find and update the node
+        fn update_recursive(node: TreeNode, key: &[u8], value: Vec<u8>) -> (Option<TreeNode>, bool) {
+            // Check if this is the node to update
+            if node.key() == key {
+                // Create updated node with new value
+                let mut updated = node;
+                updated.inner.kv.value = value;
+                // Subtree size unchanged (in-place update)
+                return (Some(updated), true);  // true = found and updated
+            }
+
+            // Search left subtree
+            let (temp_node, maybe_left) = node.detach(true);
+            if let Some(left_child) = maybe_left {
+                let (updated_left, found) = update_recursive(left_child, key, value.clone());
+                if found {
+                    // Found and updated in left subtree, reattach and return
+                    let node = temp_node.attach(true, updated_left);
+                    return (Some(node), true);
+                }
+                // Not found in left, restore left and continue
+                let temp_node = temp_node.attach(true, updated_left);
+                
+                // Search right subtree
+                let (temp_node, maybe_right) = temp_node.detach(false);
+                if let Some(right_child) = maybe_right {
+                    let (updated_right, found) = update_recursive(right_child, key, value);
+                    if found {
+                        // Found and updated in right subtree
+                        let node = temp_node.attach(false, updated_right);
+                        return (Some(node), true);
+                    }
+                    // Not found, restore right
+                    let node = temp_node.attach(false, updated_right);
+                    return (Some(node), false);
+                } else {
+                    // No right child
+                    return (Some(temp_node), false);
+                }
+            } else {
+                // No left child, search right
+                let (temp_node, maybe_right) = temp_node.detach(false);
+                if let Some(right_child) = maybe_right {
+                    let (updated_right, found) = update_recursive(right_child, key, value);
+                    let node = temp_node.attach(false, updated_right);
+                    return (Some(node), found);
+                } else {
+                    // No children at all
+                    return (Some(temp_node), false);
+                }
+            }
+        }
+
+        let (maybe_tree, found) = update_recursive(self, key, value);
+        match maybe_tree {
+            Some(tree) if found => {
+                Ok((tree, key.to_vec())).wrap_with_cost(OperationCost::default())
+            }
+            _ => {
+                Err(Error::InternalError("key not found in tree for update"))
+                    .wrap_with_cost(OperationCost::default())
+            }
+        }
+    }
+
     /// the node type
     pub fn node_type(&self) -> NodeType {
         self.inner.kv.feature_type.node_type()

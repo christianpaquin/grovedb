@@ -55,28 +55,35 @@ The merk-collab-demo is **working end-to-end**! You can run the server and clien
 
 ### ⚠️ Current Limitations & Design Decisions
 
-#### 1. **Hybrid Architecture: Reference-Based Protocol + Position-Based Implementation**
+#### 1. **Pure Reference-Based Operations with Position Discovery**
 
 **Current approach**: 
-- Protocol uses reference-based operations (client sends `target_uuid`)
-- Server converts to position-based operations internally
+- Protocol uses reference-based operations (`InsertAfterKeyWithKey`, `UpdateValueByKey`)
+- No position conversion needed - operations work directly with UUIDs
+- After operations complete, server discovers actual tree position for proof generation
 
-**Why hybrid?**:
-- InsertAfterKeyWithKey (pure reference-based) can fail after tombstone operations
-- Delete does `DeleteAtPosition` + `InsertAtPositionWithKey` (creates tombstone)
-- This batch changes tree structure, breaking parent pointer traversal
-- Solution: Use reference-based protocol, convert to positions server-side
+**Implementation**:
+- `InsertAfterKeyWithKey`: Direct insertion after target UUID
+- `UpdateValueByKey`: In-place value update for tombstones (no structural changes)
+- Position discovery: After insertion, iterate positions 0-N to find where UUID landed
+- Proof generation: Generate proof at discovered position
+
+**Why position discovery?**:
+- Tree rebalancing can change positions during insertion
+- Cache position (target + 1) may differ from actual tree position
+- Solution: Query tree after insertion to find actual position
+- Ensures proofs contain correct UUID at correct position
 
 **Benefits**:
-- ✅ Protocol is reference-based (resilient to concurrent edits)
+- ✅ Pure reference-based (Matt Weidner's design)
+- ✅ Reliable after tombstone operations (UpdateValueByKey = no structural change)
+- ✅ Correct proofs (position discovered, not predicted)
 - ✅ Client generates UUIDs (zero-latency typing)
-- ✅ Implementation is reliable (position operations always work)
-- ✅ Cache lookup is fast for demo scale (O(n) but small n)
 
-**For production at scale**:
-- Add UUID→position index (HashMap or BTreeMap)
-- Or: Make InsertAfterKeyWithKey more robust to structural changes
-- Or: Keep hybrid approach (works well, proven reliable)
+**Performance considerations**:
+- Position discovery is O(n) scan of tree (acceptable for demo scale)
+- For production: Add UUID→position index or query API in Merk
+- Alternative: Key-based proofs instead of positional proofs
 
 #### 2. **Storage Backend** (Server)
 

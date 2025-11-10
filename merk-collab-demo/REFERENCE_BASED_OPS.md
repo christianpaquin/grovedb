@@ -6,13 +6,19 @@ The merk library now fully supports Matt Weidner's ["Text Without CRDTs"](https:
 
 ### What Was Implemented
 
-**New ListOp variant:**
+**New ListOp variants:**
 ```rust
 /// Insert after a UUID with client-provided key - IMPLEMENTED ✅
 InsertAfterKeyWithKey {
     target_key: Vec<u8>,  // UUID to insert after
     key: Vec<u8>,          // Client-provided UUID for new element
     value: Vec<u8>,
+}
+
+/// Update value by UUID (for tombstones) - IMPLEMENTED ✅
+UpdateValueByKey {
+    key: Vec<u8>,    // UUID to update
+    value: Vec<u8>,  // New value (e.g., [1, char] for tombstone)
 }
 ```
 
@@ -39,7 +45,7 @@ See `IMPLEMENTATION_STATUS.md` for detailed implementation notes.
 **Operations:**
 1. `insert_after(reference_uuid, new_uuid, char)` ✅ - **Implemented as `InsertAfterKeyWithKey`**
 2. `insert_first(new_uuid, char)` ✅ - **Use `InsertAtPositionWithKey` with position=0**
-3. `delete(uuid)` ⚠️ - **Use tombstone via `UpdateValueByKey` (TODO: add this variant)**
+3. `delete(uuid)` ✅ - **Implemented as `UpdateValueByKey` for tombstone updates**
 
 **Key Property**: Operations reference **UUIDs**, not positions. This makes them unambiguous even when applied concurrently offline.
 
@@ -75,9 +81,9 @@ ListOp::InsertAfterKeyWithKey {
 
 **Result**: Client shows character immediately, server confirms with same UUID. Zero latency typing!
 
-## Current merk-collab-demo Implementation: ✅ HYBRID APPROACH
+## Current merk-collab-demo Implementation: ✅ PURE REFERENCE-BASED
 
-The demo uses a **hybrid architecture** that combines the benefits of both approaches:
+The demo uses **pure reference-based operations** following Matt Weidner's design:
 
 ### Protocol Level: Reference-Based ✅
 **Client sends:**
@@ -96,57 +102,64 @@ The demo uses a **hybrid architecture** that combines the benefits of both appro
 - Resilient to concurrent edits (positions don't shift)
 - Follows Matt Weidner's "Text Without CRDTs" design
 
-### Implementation Level: Position-Based ✅
+### Implementation Level: Reference-Based ✅
 **Server internally uses:**
 ```rust
-// 1. Lookup target_uuid in cache to get tree position
-let tree_position = self.find_uuid_position(target_key)? + 1;
+// Direct UUID-based insertion (no position conversion!)
+let op = if let Some(target_key) = target_uuid {
+    ListOp::InsertAfterKeyWithKey {
+        target_key,
+        key: uuid.clone(),
+        value: encode_value(value, false),
+    }
+} else {
+    // First character
+    ListOp::InsertAtPositionWithKey {
+        position: 0,
+        key: uuid.clone(),
+        value: encode_value(value, false),
+    }
+};
 
-// 2. Use position-based insertion
-ListOp::InsertAtPositionWithKey {
-    position: tree_position,  // Calculated from cache
-    key: uuid,                 // Client's UUID
-    value: encode_value(value, false),
-}
+// Apply operation
+self.merk.apply_list_batch(&[op], &self.grove_version)?;
+
+// Discover actual tree position for proof generation
+let actual_tree_position = self.find_actual_tree_position(&uuid)?;
+
+// Generate proof at discovered position
+let proof = self.merk.prove_position(actual_tree_position as u64, &self.grove_version)?;
 ```
 
-**Why this approach?**
-- More reliable after tombstone operations (delete+reinsert changes tree structure)
-- InsertAfterKeyWithKey's fetch closure can fail after structural changes
-- Cache lookup is fast and accurate (O(n) scan, but small n for demo)
-- Combines protocol resilience with implementation reliability
+**For deletions:**
+```rust
+// In-place tombstone update (no structural changes!)
+let op = ListOp::UpdateValueByKey {
+    key: uuid.clone(),
+    value: encode_value(value, true),  // Mark as deleted
+};
+```
 
 ### What Makes This Work
 
-1. **Character cache** - Server maintains `Vec<Character>` with all characters (including tombstones)
-2. **UUID lookup** - `find_uuid_position()` finds tree position from UUID in O(n)
-3. **Position translation** - `visible_to_tree_position()` handles tombstones
-4. **Atomicity** - Delete operations use batch: `[DeleteAtPosition, InsertAtPositionWithKey]`
+1. **InsertAfterKeyWithKey** - Direct UUID-based insertion in Merk tree
+2. **UpdateValueByKey** - In-place value updates for tombstones (no tree restructuring)
+3. **Position discovery** - After insertion, iterate positions to find where UUID landed
+4. **Proof generation** - Generate proof at discovered position (not predicted position)
 
-### Why Not Pure InsertAfterKeyWithKey?
+### Why Position Discovery?
 
-We tried it! But discovered:
-- Delete operations do: `DeleteAtPosition` + `InsertAtPositionWithKey` (for tombstone)
-- This batch changes tree structure
-- InsertAfterKeyWithKey uses parent pointer traversal via fetch closure
-- After structural changes, fetch can fail to find target node
-- **Solution**: Use reference-based protocol, but convert to positions server-side
+Tree rebalancing during insertion can change positions:
+- Cache position: `target_position + 1` (predicted)
+- Actual position: May differ due to AVL rebalancing
+- Solution: Query tree after insertion to find actual position
+- Ensures proofs contain correct UUID at correct position
 
-## What Still Needs Work
+## What Makes Pure Reference-Based Reliable Now
 
-### Optional Enhancement: Pure InsertAfterKeyWithKey
+### The Key: UpdateValueByKey
 
-For a fully reference-based implementation without position conversion:
-
-**Challenge**: InsertAfterKeyWithKey's fetch closure can fail after tombstone operations
-**Options**:
-1. Make fetch more robust to handle structural changes from delete+reinsert
-2. Use alternative tree traversal that doesn't rely on parent pointers
-3. Keep hybrid approach (current - works reliably)
-
-### Optional Enhancement: UpdateValueByKey for Tombstones
-
-Currently deletions use batch operation:
+Previously, deletions used batch operations:
 ```rust
 vec![
     ListOp::DeleteAtPosition { position },
@@ -154,7 +167,9 @@ vec![
 ]
 ```
 
-Alternative with new operation:
+**Problem**: This changes tree structure, breaking InsertAfterKeyWithKey's parent traversal
+
+**Solution**: In-place update with UpdateValueByKey:
 ```rust
 ListOp::UpdateValueByKey {
     key: uuid,
@@ -162,34 +177,28 @@ ListOp::UpdateValueByKey {
 }
 ```
 
-**Benefits**: More efficient (single operation), conceptually cleaner
-**Current status**: Works fine with batch, low priority
+**Benefits**: 
+- No structural changes (tree positions stable)
+- InsertAfterKeyWithKey works reliably after deletions
+- More efficient (single operation)
+- Pure reference-based operations throughout
 
 ## Recommendation
 
-✅ **Current hybrid approach is production-ready!**
+✅ **Current pure reference-based implementation is production-ready!**
 
 **Pros:**
 - Protocol is reference-based (Matt Weidner's design benefits)
-- Implementation is reliable (no fetch closure issues)
+- Implementation is reference-based (no position conversion)
+- Deletions use UpdateValueByKey (no tree restructuring)
 - Zero-latency typing works perfectly
 - Auditor can verify all operations
 - All tests passing
 
-**Next steps** (optional):
-1. Performance optimization: Index or hash map for UUID lookups
-2. Make InsertAfterKeyWithKey more robust for future use
-3. Add UpdateValueByKey for cleaner tombstone updates
-
-**For Production**: Implement Option 1 + Option 2
-- Adds two enum variants to `ListOp`
-- Requires implementing position lookup and update logic
-- Enables full Matt Weidner design with zero-latency typing
-
-**For Demo**: Keep current hybrid approach
-- Documents the limitations clearly
-- Shows the tombstone concept working
-- Avoids large merk library changes for now
+**Performance considerations:**
+- Position discovery is O(n) scan (acceptable for demo scale)
+- For production: Add UUID→position index or Merk query API
+- Alternative: Key-based proofs instead of positional proofs
 
 ## Example: True Reference-Based Operations
 

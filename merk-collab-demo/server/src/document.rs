@@ -126,38 +126,19 @@ impl Document {
         uuid: Vec<u8>,
         value: char,
     ) -> Result<(Vec<u8>, [u8; 32], Vec<u8>)> {
-        // First, determine the tree position where we'll insert
+        // Calculate tree position BEFORE inserting (for cache update and proof generation)
         let tree_position = if let Some(ref target_key) = target_uuid {
-            // Find the target UUID in our cache (including tombstones)
-            let target_pos = self.find_uuid_position(target_key)
-                .with_context(|| {
-                    let target_uuid_str = uuid::Uuid::from_slice(target_key)
-                        .map(|u| u.to_string())
-                        .unwrap_or_else(|_| hex::encode(target_key));
-                    let cache_uuids: Vec<String> = self.characters.iter()
-                        .map(|c| {
-                            let u = uuid::Uuid::from_slice(&c.uuid)
-                                .map(|u| u.to_string())
-                                .unwrap_or_else(|_| hex::encode(&c.uuid));
-                            format!("{} (deleted={})", u, c.deleted)
-                        })
-                        .collect();
-                    format!(
-                        "Target UUID {} not found in cache. Cache contains: [{}]",
-                        target_uuid_str,
-                        cache_uuids.join(", ")
-                    )
-                })?;
-            target_pos + 1  // Insert after it
+            // Find target position in cache, insert after it
+            self.find_uuid_position(target_key)? + 1
         } else {
             0  // Insert at beginning
         };
 
-        let op = if target_uuid.is_some() {
-            // We know the position from our cache, so use position-based insertion
-            // This is more reliable than InsertAfterKeyWithKey after deletions/reinsertions
-            ListOp::InsertAtPositionWithKey {
-                position: tree_position as u64,
+        let op = if let Some(target_key) = target_uuid {
+            // Use reference-based InsertAfterKeyWithKey (pure reference-based!)
+            // With UpdateValueByKey for deletions, this now works reliably
+            ListOp::InsertAfterKeyWithKey {
+                target_key,
                 key: uuid.clone(),
                 value: encode_value(value, false),
             }
@@ -185,14 +166,19 @@ impl Document {
             return Err(anyhow!("UUID mismatch: expected {:?}, got {:?}", uuid, actual_uuid));
         }
 
-        // Generate proof for the tree position
-        let proof_result = self.merk.prove_position(tree_position as u64, &self.grove_version)
+        // For reference-based operations, the actual tree position might differ from
+        // our calculated position due to tree rebalancing. We need to find where
+        // the UUID actually ended up in the tree.
+        let actual_tree_position = self.find_actual_tree_position(&uuid)?;
+
+        // Generate proof for the ACTUAL tree position
+        let proof_result = self.merk.prove_position(actual_tree_position as u64, &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to generate proof: {:?}", e))?;
 
         let root_hash = self.merk.root_hash().value;
 
-        // Update local cache at tree position
+        // Update local cache at the calculated position (for future lookups)
         self.characters.insert(
             tree_position,
             Character {
@@ -203,6 +189,38 @@ impl Document {
         );
 
         Ok((actual_uuid, root_hash, proof_result.proof))
+    }
+
+    /// Find the actual position of a UUID in the Merk tree by trying positions
+    fn find_actual_tree_position(&self, uuid: &[u8]) -> Result<usize> {
+        use grovedb_merk::proofs::positional::verify_positional_proof;
+        
+        // Get current root hash for verification
+        let root_hash = self.merk.root_hash().value;
+        
+        // Try positions 0 to tree size
+        let tree_size = self.characters.len();
+        for pos in 0..=tree_size {
+            // Generate proof at this position
+            match self.merk.prove_position(pos as u64, &self.grove_version).value {
+                Ok(proof_construction) => {
+                    // Verify the proof to extract the key
+                    match verify_positional_proof(
+                        &proof_construction.proof,
+                        pos as u64,
+                        root_hash,
+                        &self.grove_version
+                    ).value {
+                        Ok(proof_result) if proof_result.key == uuid => {
+                            return Ok(pos);
+                        }
+                        _ => continue,
+                    }
+                }
+                Err(_) => continue, // Position might be out of bounds, try next
+            }
+        }
+        Err(anyhow!("Could not find UUID in tree at any position"))
     }
 
     /// Find the position of a UUID in the character cache
@@ -226,34 +244,29 @@ impl Document {
 
         let value = character.value;
 
-        // To mark as deleted, we need to:
-        // 1. Delete the existing entry
-        // 2. Re-insert with the same UUID but marked as deleted
-        // This is done as a batch operation to maintain atomicity
-        let ops = vec![
-            ListOp::DeleteAtPosition {
-                position: tree_position as u64,
-            },
-            ListOp::InsertAtPositionWithKey {
-                position: tree_position as u64,
-                key: uuid.clone(),
-                value: encode_value(value, true),  // Mark as deleted (tombstone)
-            },
-        ];
+        // Mark as deleted using UpdateValueByKey (in-place update, no structural changes)
+        // This is more efficient than delete+reinsert and keeps tree structure stable
+        let op = ListOp::UpdateValueByKey {
+            key: uuid.clone(),
+            value: encode_value(value, true),  // Mark as deleted (tombstone)
+        };
 
-        // Apply the batch operation
-        self.merk.apply_list_batch(&ops, &self.grove_version)
+        // Apply the update operation
+        self.merk.apply_list_batch(&[op], &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to mark as deleted: {:?}", e))?;
 
-        // Generate proof AFTER marking as deleted (at tree position)
-        let proof_result = self.merk.prove_position(tree_position as u64, &self.grove_version)
+        // Find the actual position of the UUID in the tree after update
+        let actual_tree_position = self.find_actual_tree_position(&uuid)?;
+
+        // Generate proof at the ACTUAL tree position
+        let proof_result = self.merk.prove_position(actual_tree_position as u64, &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to generate proof: {:?}", e))?;
 
         let root_hash = self.merk.root_hash().value;
 
-        // Update local cache to mark as deleted (at tree position)
+        // Update local cache to mark as deleted (at the cached tree position)
         self.characters[tree_position].deleted = true;
 
         Ok((uuid, root_hash, proof_result.proof))

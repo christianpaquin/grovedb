@@ -197,6 +197,35 @@ pub enum ListOp {
         key: Vec<u8>,
         value: Vec<u8>,
     },
+
+    /// Update the value of an existing element by its key (in-place update).
+    ///
+    /// # Arguments
+    /// * `key` - UUID key of the element to update
+    /// * `value` - New value to replace the existing value
+    ///
+    /// # Use Case
+    /// Marking a character as deleted (tombstone) without changing tree structure:
+    /// ```rust,ignore
+    /// // Mark character as deleted
+    /// let op = ListOp::UpdateValueByKey {
+    ///     key: uuid_to_delete,
+    ///     value: vec![1, b'c'],  // [deleted_flag=1, char='c']
+    /// };
+    /// ```
+    ///
+    /// # Benefits
+    /// - No structural changes (tree shape unchanged)
+    /// - Parent pointers remain valid
+    /// - More efficient than delete+reinsert
+    /// - Enables reliable InsertAfterKeyWithKey after deletions
+    ///
+    /// # Note
+    /// Returns an error if the key does not exist in the tree.
+    UpdateValueByKey {
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
 }
 
 #[cfg(feature = "full")]
@@ -948,6 +977,17 @@ where
                     keys_in_tree.insert(key.clone());
                     current_size += 1; // Insert increases size
                 }
+                ListOp::UpdateValueByKey { key, .. } => {
+                    // Verify key exists in tree (accounting for previous operations)
+                    if !keys_in_tree.contains(key) {
+                        // Restore tree before returning error
+                        self.tree.set(Some(tree));
+                        return Err(Error::InvalidInputError(
+                            "UpdateValueByKey key not found in tree"
+                        )).wrap_with_cost(cost);
+                    }
+                    // Update doesn't change size
+                }
             }
         }
 
@@ -1080,6 +1120,43 @@ where
                     
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
+                    tree = new_tree;
+                }
+                
+                ListOp::UpdateValueByKey { key, value } => {
+                    // Update value in-place without structural changes
+                    let temp_tree = tree;
+                    
+                    // Create a map of all nodes for the fetch closure
+                    let mut node_map = std::collections::HashMap::new();
+                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
+                        map.insert(node.key().to_vec(), node.clone());
+                        if let Some(left) = node.child(true) {
+                            collect_nodes(left, map);
+                        }
+                        if let Some(right) = node.child(false) {
+                            collect_nodes(right, map);
+                        }
+                    }
+                    collect_nodes(&temp_tree, &mut node_map);
+                    
+                    // Call update_value_by_key with the fetch closure
+                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    let update_result = temp_tree.update_value_by_key(
+                        key,
+                        value.clone(),
+                        fetch
+                    ).unwrap_add_cost(&mut cost);
+                    
+                    let (new_tree, returned_key) = match update_result {
+                        Ok(result) => result,
+                        Err(e) => {
+                            return Err(e).wrap_with_cost(cost);
+                        }
+                    };
+                    
+                    result_keys.push(returned_key.clone());
+                    // Note: Update doesn't add to all_new_keys since it's not a new insertion
                     tree = new_tree;
                 }
             }
@@ -1258,6 +1335,34 @@ where
                     };
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
+                    tree = new_tree;
+                }
+                ListOp::UpdateValueByKey { key, value } => {
+                    // Update value in-place without structural changes
+                    let temp_tree = tree;
+                    
+                    // Build node map for fetch closure
+                    let mut node_map = std::collections::HashMap::new();
+                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
+                        map.insert(node.key().to_vec(), node.clone());
+                        if let Some(left) = node.child(true) {
+                            collect_nodes(left, map);
+                        }
+                        if let Some(right) = node.child(false) {
+                            collect_nodes(right, map);
+                        }
+                    }
+                    collect_nodes(&temp_tree, &mut node_map);
+                    
+                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    let update_result = temp_tree.update_value_by_key(key, value.clone(), fetch)
+                        .unwrap_add_cost(&mut cost);
+                    let (new_tree, returned_key) = match update_result {
+                        Ok(result) => result,
+                        Err(e) => return Err(e).wrap_with_cost(cost),
+                    };
+                    result_keys.push(returned_key);
+                    // Note: Update doesn't add to all_new_keys since it's not a new insertion
                     tree = new_tree;
                 }
             }
@@ -1803,6 +1908,62 @@ mod tests {
         // 2. Client shows character immediately with that UUID
         // 3. Server confirms operation with same UUID
         // 4. No conflict resolution needed!
+    }
+
+    #[test]
+    fn test_apply_list_batch_update_value_by_key() {
+        // Test UpdateValueByKey - update value without changing tree structure
+        // This is ideal for tombstone deletions in collaborative editing
+        let grove_version = GroveVersion::latest();
+        let mut merk = make_list_merk();
+
+        // Setup: Insert three characters 'a', 'b', 'c'
+        let key_a = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let key_b = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let key_c = uuid::Uuid::new_v4().as_bytes().to_vec();
+        
+        let setup_batch = vec![
+            ListOp::InsertAtPositionWithKey { position: 0, key: key_a.clone(), value: vec![0, b'a'] },
+            ListOp::InsertAtPositionWithKey { position: 1, key: key_b.clone(), value: vec![0, b'b'] },
+            ListOp::InsertAtPositionWithKey { position: 2, key: key_c.clone(), value: vec![0, b'c'] },
+        ];
+        merk.apply_list_batch(&setup_batch, &grove_version).unwrap().unwrap();
+
+        // Mark 'b' as deleted (tombstone) using UpdateValueByKey
+        // Value format: [deleted_flag=1, char_byte]
+        let update_batch = vec![
+            ListOp::UpdateValueByKey { 
+                key: key_b.clone(), 
+                value: vec![1, b'b']  // Tombstone: deleted_flag=1
+            },
+        ];
+        let result = merk.apply_list_batch(&update_batch, &grove_version).unwrap().unwrap();
+        
+        // Verify the returned key matches
+        assert_eq!(result.keys.len(), 1);
+        assert_eq!(result.keys[0], key_b);
+
+        // Now insert 'd' after 'b' using InsertAfterKeyWithKey
+        // This should work reliably because UpdateValueByKey didn't change tree structure
+        let key_d = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let insert_batch = vec![
+            ListOp::InsertAfterKeyWithKey {
+                target_key: key_b.clone(),
+                key: key_d.clone(),
+                value: vec![0, b'd'],
+            },
+        ];
+        let insert_result = merk.apply_list_batch(&insert_batch, &grove_version).unwrap().unwrap();
+        
+        // Verify insert after tombstone works
+        assert_eq!(insert_result.keys.len(), 1);
+        assert_eq!(insert_result.keys[0], key_d);
+
+        // This demonstrates:
+        // 1. UpdateValueByKey marks 'b' as deleted without structural changes
+        // 2. InsertAfterKeyWithKey can reliably insert after 'b' (even though it's deleted)
+        // 3. No delete+reinsert batch needed (more efficient)
+        // 4. Tree structure preserved (parent pointers remain valid)
     }
 }
 
