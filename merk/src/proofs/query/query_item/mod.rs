@@ -526,6 +526,7 @@ impl QueryItem {
     }
 
     #[cfg(any(feature = "minimal", feature = "verify"))]
+    #[allow(dead_code)]
     fn enum_value(&self) -> u32 {
         match self {
             QueryItem::Key(_) => 0,

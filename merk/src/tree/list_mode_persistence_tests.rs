@@ -46,6 +46,7 @@
 //! RocksDB caching will keep frequently-accessed nodes hot in memory.
 
 #[cfg(all(feature = "full", feature = "list_mode"))]
+#[allow(unused_imports)]
 mod tests {
     use grovedb_path::SubtreePath;
     use grovedb_storage::{rocksdb_storage::test_utils::TempStorage, Storage, StorageBatch};

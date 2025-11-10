@@ -673,6 +673,7 @@ impl<S, F> fmt::Debug for TreeCacheMerkByPath<S, F> {
 trait TreeCache<G, SR> {
     fn insert(&mut self, op: &QualifiedGroveDbOp, tree_type: TreeType) -> CostResult<(), Error>;
 
+    #[allow(dead_code)]
     fn get_batch_run_mode(&self) -> BatchRunMode;
 
     /// We will also be returning an op mode, this is to be used in propagation

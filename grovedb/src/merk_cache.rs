@@ -13,13 +13,16 @@ use grovedb_version::version::GroveVersion;
 
 use crate::{Error, GroveDb, Transaction};
 
+#[allow(dead_code)]
 type TxMerk<'db> = Merk<PrefixedRocksDbTransactionContext<'db>>;
 
 /// We store Merk on heap to preserve its location as well as borrow flag
 /// alongside.
+#[allow(dead_code)]
 type CachedMerkEntry<'db> = Box<(Cell<bool>, TxMerk<'db>)>;
 
 /// Structure to keep subtrees open in memory for repeated access.
+#[allow(dead_code)]
 pub(crate) struct MerkCache<'db, 'b, B: AsRef<[u8]>> {
     db: &'db GroveDb,
     pub(crate) version: &'db GroveVersion,
@@ -28,6 +31,7 @@ pub(crate) struct MerkCache<'db, 'b, B: AsRef<[u8]>> {
     merks: UnsafeCell<BTreeMap<SubtreePathBuilder<'b, B>, CachedMerkEntry<'db>>>,
 }
 
+#[allow(dead_code)]
 impl<'db, 'b, B: AsRef<[u8]>> MerkCache<'db, 'b, B> {
     /// Initialize a new `MerkCache` instance
     pub(crate) fn new(
@@ -171,11 +175,13 @@ impl<'db, 'b, B: AsRef<[u8]>> MerkCache<'db, 'b, B> {
 
 /// Wrapper over `Merk` tree to manage unqiue borrow dynamically.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct MerkHandle<'db, 'c> {
     merk: *mut TxMerk<'db>,
     taken_handle: &'c Cell<bool>,
 }
 
+#[allow(dead_code)]
 impl<'db> MerkHandle<'db, '_> {
     pub(crate) fn for_merk<T>(&mut self, f: impl FnOnce(&mut TxMerk<'db>) -> T) -> T {
         if self.taken_handle.get() {

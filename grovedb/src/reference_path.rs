@@ -73,6 +73,7 @@ pub enum ReferencePathType {
 
 impl ReferencePathType {
     /// Get an inverted reference
+    #[allow(dead_code)]
     pub(crate) fn invert<B: AsRef<[u8]>>(&self, path: SubtreePath<B>, key: &[u8]) -> Option<Self> {
         Some(match self {
             // Absolute path shall point to a fully qualified path of the reference's origin
@@ -540,6 +541,7 @@ impl ReferencePathType {
 }
 
 #[cfg(feature = "minimal")]
+#[allow(dead_code)]
 pub(crate) struct ResolvedReference<'db, 'b, 'c, B> {
     pub target_merk: MerkHandle<'db, 'c>,
     pub target_path: SubtreePathBuilder<'b, B>,
@@ -549,6 +551,7 @@ pub(crate) struct ResolvedReference<'db, 'b, 'c, B> {
 }
 
 #[cfg(feature = "minimal")]
+#[allow(dead_code)]
 pub(crate) fn follow_reference<'db, 'b, 'c, B: AsRef<[u8]>>(
     merk_cache: &'c MerkCache<'db, 'b, B>,
     path: SubtreePathBuilder<'b, B>,
@@ -636,6 +639,7 @@ pub(crate) fn follow_reference<'db, 'b, 'c, B: AsRef<[u8]>>(
 #[cfg(feature = "minimal")]
 /// Follow references stopping at the immediate element without following
 /// further.
+#[allow(dead_code)]
 pub(crate) fn follow_reference_once<'db, 'b, 'c, B: AsRef<[u8]>>(
     merk_cache: &'c MerkCache<'db, 'b, B>,
     path: SubtreePathBuilder<'b, B>,

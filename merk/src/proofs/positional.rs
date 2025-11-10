@@ -591,6 +591,7 @@ fn verify_positional_proof_internal(
 
 /// Recursively verifies the position within a tree and extracts the element
 #[cfg(feature = "list_mode")]
+#[allow(dead_code)]
 fn verify_position_in_tree(
     tree: &Tree,
     target_position: u64,

@@ -159,45 +159,41 @@ impl Tree {
                     .flat_map(|kv_hash| compute_hash(self, kv_hash))
             }
             // List-mode variants with subtree_size
-            Node::HashWithSubtreeSize(hash, _size) => {
+            Node::HashWithSubtreeSize(hash, _) => {
                 // For list-mode, hash already includes subtree_size in computation
                 (*hash).wrap_with_cost(Default::default())
             }
+            #[cfg(feature = "list_mode")]
             Node::KVWithSubtreeSize(key, value, size) => {
                 // For list-mode, compute kv_hash then use node_hash_list_mode
-                #[cfg(feature = "list_mode")]
-                {
-                    kv_hash(key.as_slice(), value.as_slice())
-                        .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size))
-                }
-                #[cfg(not(feature = "list_mode"))]
-                {
-                    // Fallback if list_mode feature not enabled (shouldn't happen)
-                    kv_hash(key.as_slice(), value.as_slice())
-                        .flat_map(|kv_hash| compute_hash(self, kv_hash))
-                }
+                kv_hash(key.as_slice(), value.as_slice())
+                    .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size))
             }
+            #[cfg(not(feature = "list_mode"))]
+            Node::KVWithSubtreeSize(key, value, _) => {
+                // Fallback if list_mode feature not enabled (shouldn't happen)
+                kv_hash(key.as_slice(), value.as_slice())
+                    .flat_map(|kv_hash| compute_hash(self, kv_hash))
+            }
+            #[cfg(feature = "list_mode")]
             Node::KVValueHashWithSubtreeSize(key, _, value_hash, size) => {
                 // For list-mode with value hash, use node_hash_list_mode
-                #[cfg(feature = "list_mode")]
-                {
-                    #[cfg(test)]
-                    eprintln!("[HASH] KVValueHashWithSubtreeSize: key={:?}, value_hash={:?}, size={}", 
-                        String::from_utf8_lossy(key.as_slice()), value_hash, size);
-                    
-                    kv_digest_to_kv_hash(key.as_slice(), value_hash)
-                        .flat_map(|kv_hash| {
-                            #[cfg(test)]
-                            eprintln!("[HASH] Computed kv_hash: {:?}", kv_hash);
-                            compute_hash_list_mode(self, kv_hash, *size)
-                        })
-                }
-                #[cfg(not(feature = "list_mode"))]
-                {
-                    // Fallback if list_mode feature not enabled (shouldn't happen)
-                    kv_digest_to_kv_hash(key.as_slice(), value_hash)
-                        .flat_map(|kv_hash| compute_hash(self, kv_hash))
-                }
+                #[cfg(test)]
+                eprintln!("[HASH] KVValueHashWithSubtreeSize: key={:?}, value_hash={:?}, size={}", 
+                    String::from_utf8_lossy(key.as_slice()), value_hash, size);
+                
+                kv_digest_to_kv_hash(key.as_slice(), value_hash)
+                    .flat_map(|kv_hash| {
+                        #[cfg(test)]
+                        eprintln!("[HASH] Computed kv_hash: {:?}", kv_hash);
+                        compute_hash_list_mode(self, kv_hash, *size)
+                    })
+            }
+            #[cfg(not(feature = "list_mode"))]
+            Node::KVValueHashWithSubtreeSize(key, _, value_hash, _) => {
+                // Fallback if list_mode feature not enabled (shouldn't happen)
+                kv_digest_to_kv_hash(key.as_slice(), value_hash)
+                    .flat_map(|kv_hash| compute_hash(self, kv_hash))
             }
         }
     }

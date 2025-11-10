@@ -438,6 +438,7 @@ impl TreeNode {
     }
 
     #[cfg(feature = "list_mode")]
+    #[allow(dead_code)]
     /// Find the node at the given 0-based position using subtree_size descent.
     /// Returns a mutable reference to the node and the path taken (for updating ancestors).
     /// This is a helper for insert_at and other positional operations.
@@ -1611,7 +1612,16 @@ impl TreeNode {
     /// side after applying some operation to the detached child.
     #[inline]
     pub fn detach(mut self, left: bool) -> (Self, Option<Self>) {
-    let mut maybe_child = match self.slot_mut(left).take() {
+        #[cfg(feature = "list_mode")]
+        let mut maybe_child = match self.slot_mut(left).take() {
+            None => None,
+            Some(Link::Reference { .. }) => None,
+            Some(Link::Modified { tree, .. }) => Some(tree),
+            Some(Link::Uncommitted { tree, .. }) => Some(tree),
+            Some(Link::Loaded { tree, .. }) => Some(tree),
+        };
+        #[cfg(not(feature = "list_mode"))]
+        let maybe_child = match self.slot_mut(left).take() {
             None => None,
             Some(Link::Reference { .. }) => None,
             Some(Link::Modified { tree, .. }) => Some(tree),

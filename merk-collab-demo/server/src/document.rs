@@ -1,6 +1,5 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use grovedb_merk::{Merk, ListOp, MerkType, TreeType};
-use grovedb_merk::merk::prove::ProofConstructionResult;
 use grovedb_path::SubtreePath;
 use grovedb_storage::{rocksdb_storage::test_utils::TempStorage, Storage, StorageBatch};
 use grovedb_version::version::GroveVersion;
@@ -24,6 +23,7 @@ fn encode_value(ch: char, deleted: bool) -> Vec<u8> {
 
 /// Decode a character value with deletion flag
 /// Returns (char, is_deleted)
+#[allow(dead_code)]
 fn decode_value(bytes: &[u8]) -> Result<(char, bool)> {
     if bytes.len() != 2 {
         return Err(anyhow!("Invalid value format: expected 2 bytes, got {}", bytes.len()));
@@ -95,6 +95,7 @@ impl Document {
     }
 
     /// Convert a visible position (counting only active characters) to tree position (including tombstones)
+    #[allow(dead_code)]
     fn visible_to_tree_position(&self, visible_pos: usize) -> usize {
         let mut active_count = 0;
         for (tree_pos, ch) in self.characters.iter().enumerate() {
@@ -110,6 +111,7 @@ impl Document {
     }
 
     /// Convert a tree position (including tombstones) to visible position (counting only active characters)
+    #[allow(dead_code)]
     fn tree_to_visible_position(&self, tree_pos: usize) -> usize {
         self.characters.iter()
             .take(tree_pos)
@@ -276,6 +278,7 @@ impl Document {
     /// DEPRECATED: Use insert_after() for reference-based operations
     /// The position counts only active characters, not tombstones
     /// Returns the UUID, new root hash, and a positional proof
+    #[allow(dead_code)]
     pub fn insert(
         &mut self,
         visible_position: usize,
@@ -331,6 +334,7 @@ impl Document {
     /// Delete a character at a specific VISIBLE position (client perspective)
     /// The position counts only active characters, not tombstones
     /// Returns the UUID of the deleted character, new root hash, and a positional proof
+    #[allow(dead_code)]
     pub fn delete(&mut self, visible_position: usize) -> Result<(Vec<u8>, [u8; 32], Vec<u8>)> {
         // Convert visible position to tree position
         let tree_position = self.visible_to_tree_position(visible_position);
@@ -382,11 +386,13 @@ impl Document {
     }
 
     /// Get the size of the document (number of active/non-deleted characters)
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.characters.iter().filter(|c| !c.deleted).count()
     }
 
     /// Check if the document is empty
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.characters.is_empty()
     }

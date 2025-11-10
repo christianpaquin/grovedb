@@ -415,6 +415,7 @@ impl<'db, S: StorageContext<'db>> Restorer<S> {
     }
 
     /// Rebuild restoration state from partial storage state
+    #[allow(dead_code)]
     fn attempt_state_recovery(&mut self, grove_version: &GroveVersion) -> Result<(), Error> {
         // TODO: think about the return type some more
         let (bad_link_map, parent_keys) = self.merk.verify(false, grove_version);

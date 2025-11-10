@@ -4,7 +4,7 @@ use axum::{
         State,
     },
     response::IntoResponse,
-    routing::{get, post},
+    routing::get,
     Json, Router,
 };
 use anyhow::anyhow;
@@ -329,8 +329,6 @@ async fn handle_client_message(
 }
 
 use futures_util::StreamExt;
-use futures_util::stream::SplitStream;
-use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
 use std::io::Write;
 use std::fs::OpenOptions;
