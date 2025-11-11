@@ -1755,7 +1755,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Cost tracking not yet implemented for batch operations
+    #[ignore] // Storage cost tracking not fully implemented in commit() - costs from batch.put() operations not accumulated
     fn test_apply_list_batch_cost_tracking() {
         // Test that batch operations track costs correctly
         let grove_version = GroveVersion::latest();

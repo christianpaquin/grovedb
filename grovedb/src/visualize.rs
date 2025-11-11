@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore] // Reference visualization code is commented out in Element::visualize (line 71-80)
     fn test_visualize_reference() {
         let p1 = b"ayy".to_vec();
         let p2 = b"lmao".to_vec();
