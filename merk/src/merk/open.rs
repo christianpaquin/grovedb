@@ -1,4 +1,7 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+
+#[cfg(feature = "list_mode")]
+use std::collections::HashMap;
 
 use grovedb_costs::CostResult;
 use grovedb_storage::StorageContext;
@@ -23,6 +26,8 @@ where
             storage,
             merk_type,
             tree_type,
+            #[cfg(feature = "list_mode")]
+            node_index: RefCell::new(HashMap::new()),
         }
     }
 
@@ -41,6 +46,8 @@ where
             storage,
             merk_type: StandaloneMerk,
             tree_type,
+            #[cfg(feature = "list_mode")]
+            node_index: RefCell::new(HashMap::new()),
         };
 
         merk.load_base_root(value_defined_cost_fn, grove_version)
@@ -62,6 +69,8 @@ where
             storage,
             merk_type: BaseMerk,
             tree_type,
+            #[cfg(feature = "list_mode")]
+            node_index: RefCell::new(HashMap::new()),
         };
 
         merk.load_base_root(value_defined_cost_fn, grove_version)
@@ -84,6 +93,8 @@ where
             storage,
             merk_type: LayeredMerk,
             tree_type,
+            #[cfg(feature = "list_mode")]
+            node_index: RefCell::new(HashMap::new()),
         };
 
         merk.load_root(value_defined_cost_fn, grove_version)

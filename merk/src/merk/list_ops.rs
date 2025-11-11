@@ -839,7 +839,7 @@ where
         }
 
         // Load tree once with full materialization
-        let mut tree = match self.tree.take() {
+        let tree = match self.tree.take() {
             Some(tree) => {
                 // Tree is loaded, check if it needs full materialization
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
@@ -900,6 +900,11 @@ where
                 }
             }
         };
+
+        // Build node index for fast lookups during InsertAfterKey operations
+        self.tree.set(Some(tree));
+        self.rebuild_node_index();
+        let mut tree = self.tree.take().unwrap(); // Tree must exist after rebuild
 
         // Phase 1: Validate all operations before applying any
         // This ensures atomicity - either all operations succeed or none do
@@ -1058,21 +1063,9 @@ where
                     // InsertAfterKey generates a server-side UUID and delegates to InsertAfterKeyWithKey
                     let generated_key = uuid::Uuid::new_v4().as_bytes().to_vec();
                     
-                    // Build node map for fetch closure
+                    // Use node index for node fetch
                     let temp_tree = tree;
-                    let mut node_map = std::collections::HashMap::new();
-                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
-                        map.insert(node.key().to_vec(), node.clone());
-                        if let Some(left) = node.child(true) {
-                            collect_nodes(left, map);
-                        }
-                        if let Some(right) = node.child(false) {
-                            collect_nodes(right, map);
-                        }
-                    }
-                    collect_nodes(&temp_tree, &mut node_map);
-                    
-                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    let fetch = |k: &[u8]| self.get_node_from_index(k);
                     let insert_result = temp_tree.insert_after_key_with_key(target_key, generated_key.clone(), value.clone(), fetch)
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, returned_key) = match insert_result {
@@ -1081,7 +1074,12 @@ where
                     };
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
+                    
+                    // Update index with new tree structure
                     tree = new_tree;
+                    self.tree.set(Some(tree));
+                    self.rebuild_node_index();
+                    tree = self.tree.take().unwrap();
                 }
                 
                 ListOp::InsertAfterKeyWithKey { target_key, key, value } => {
@@ -1089,21 +1087,8 @@ where
                     // This enables optimistic local updates with zero latency
                     let temp_tree = tree;
                     
-                    // Create a map of all nodes for the fetch closure
-                    let mut node_map = std::collections::HashMap::new();
-                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
-                        map.insert(node.key().to_vec(), node.clone());
-                        if let Some(left) = node.child(true) {
-                            collect_nodes(left, map);
-                        }
-                        if let Some(right) = node.child(false) {
-                            collect_nodes(right, map);
-                        }
-                    }
-                    collect_nodes(&temp_tree, &mut node_map);
-                    
-                    // Call insert_after_key_with_key with the fetch closure
-                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    // Use node index for node fetch
+                    let fetch = |k: &[u8]| self.get_node_from_index(k);
                     let insert_result = temp_tree.insert_after_key_with_key(
                         target_key,
                         key.clone(),
@@ -1120,28 +1105,20 @@ where
                     
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
+                    
+                    // Update index with new tree structure
                     tree = new_tree;
+                    self.tree.set(Some(tree));
+                    self.rebuild_node_index();
+                    tree = self.tree.take().unwrap();
                 }
                 
                 ListOp::UpdateValueByKey { key, value } => {
                     // Update value in-place without structural changes
                     let temp_tree = tree;
                     
-                    // Create a map of all nodes for the fetch closure
-                    let mut node_map = std::collections::HashMap::new();
-                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
-                        map.insert(node.key().to_vec(), node.clone());
-                        if let Some(left) = node.child(true) {
-                            collect_nodes(left, map);
-                        }
-                        if let Some(right) = node.child(false) {
-                            collect_nodes(right, map);
-                        }
-                    }
-                    collect_nodes(&temp_tree, &mut node_map);
-                    
-                    // Call update_value_by_key with the fetch closure
-                    let fetch = |k: &[u8]| node_map.get(k).cloned();
+                    // Use node index for node fetch
+                    let fetch = |k: &[u8]| self.get_node_from_index(k);
                     let update_result = temp_tree.update_value_by_key(
                         key,
                         value.clone(),
@@ -1157,7 +1134,12 @@ where
                     
                     result_keys.push(returned_key.clone());
                     // Note: Update doesn't add to all_new_keys since it's not a new insertion
+                    
+                    // Update index with new tree structure
                     tree = new_tree;
+                    self.tree.set(Some(tree));
+                    self.rebuild_node_index();
+                    tree = self.tree.take().unwrap();
                 }
             }
         }
@@ -1204,6 +1186,9 @@ where
                 &|_, _| Ok(0) // No specialized costs for list mode
             )
         );
+
+        // Rebuild index after commit to reflect final tree state
+        self.rebuild_node_index();
 
         Ok(ListBatchResult {
             keys: result_keys,
@@ -1388,6 +1373,9 @@ where
                 &|_, _| Ok(0)
             )
         );
+
+        // Rebuild index after commit to reflect final tree state
+        self.rebuild_node_index();
 
         Ok(ListBatchResult {
             keys: result_keys,
@@ -1964,6 +1952,62 @@ mod tests {
         // 2. InsertAfterKeyWithKey can reliably insert after 'b' (even though it's deleted)
         // 3. No delete+reinsert batch needed (more efficient)
         // 4. Tree structure preserved (parent pointers remain valid)
+    }
+
+    #[test]
+    fn test_node_index_position_caching() {
+        // Test that the node index correctly caches positions
+        // This demonstrates Option 2: O(1) position lookups
+        let grove_version = GroveVersion::latest();
+        let mut merk = make_list_merk();
+
+        // Insert 5 elements
+        let batch = vec![
+            ListOp::InsertAtPosition { position: 0, value: vec![b'a'] },
+            ListOp::InsertAtPosition { position: 1, value: vec![b'b'] },
+            ListOp::InsertAtPosition { position: 2, value: vec![b'c'] },
+            ListOp::InsertAtPosition { position: 3, value: vec![b'd'] },
+            ListOp::InsertAtPosition { position: 4, value: vec![b'e'] },
+        ];
+        let result = merk.apply_list_batch(&batch, &grove_version).unwrap().unwrap();
+        
+        // Capture the keys
+        let keys: Vec<Vec<u8>> = result.keys;
+        
+        // Verify positions are cached correctly
+        // After rebuild_node_index, each key should map to its correct position
+        for (expected_pos, key) in keys.iter().enumerate() {
+            let cached_pos = merk.get_key_position(key);
+            assert_eq!(
+                cached_pos,
+                Some(expected_pos as u64),
+                "Key at position {} should have cached position {}",
+                expected_pos,
+                expected_pos
+            );
+        }
+        
+        // Now insert in the middle and verify positions update
+        let insert_batch = vec![
+            ListOp::InsertAtPosition { position: 2, value: vec![b'x'] },
+        ];
+        let insert_result = merk.apply_list_batch(&insert_batch, &grove_version).unwrap().unwrap();
+        let key_x = &insert_result.keys[0];
+        
+        // After inserting at position 2, positions should be:
+        // 0: a, 1: b, 2: x, 3: c, 4: d, 5: e
+        assert_eq!(merk.get_key_position(&keys[0]), Some(0)); // a
+        assert_eq!(merk.get_key_position(&keys[1]), Some(1)); // b
+        assert_eq!(merk.get_key_position(key_x), Some(2));     // x (new)
+        assert_eq!(merk.get_key_position(&keys[2]), Some(3)); // c (shifted)
+        assert_eq!(merk.get_key_position(&keys[3]), Some(4)); // d (shifted)
+        assert_eq!(merk.get_key_position(&keys[4]), Some(5)); // e (shifted)
+        
+        // This demonstrates:
+        // 1. Positions are correctly computed during in-order traversal
+        // 2. Index is rebuilt after each operation, keeping positions accurate
+        // 3. O(1) position lookups via get_position_from_index()
+        // 4. Ready for efficient proof generation
     }
 }
 

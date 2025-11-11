@@ -45,8 +45,8 @@ pub mod restore;
 pub mod source;
 
 use std::{
-    cell::Cell,
-    collections::{BTreeMap, BTreeSet, LinkedList},
+    cell::{Cell, RefCell},
+    collections::{BTreeMap, BTreeSet, HashMap, LinkedList},
     fmt,
 };
 
@@ -286,6 +286,11 @@ pub struct Merk<S> {
     pub merk_type: MerkType,
     /// The tree type
     pub tree_type: TreeType,
+    /// Node index for O(1) lookups in list_mode operations
+    /// Maps UUID keys to (TreeNode, position) for efficient InsertAfterKey operations
+    /// and O(1) position lookups for proof generation
+    #[cfg(feature = "list_mode")]
+    pub(crate) node_index: RefCell<HashMap<Vec<u8>, (TreeNode, u64)>>,
 }
 
 impl<S> fmt::Debug for Merk<S> {
@@ -874,6 +879,66 @@ fn fetch_node<'db>(
 }
 
 // // TODO: get rid of Fetch/source and use GroveDB storage_cost abstraction
+
+#[cfg(feature = "list_mode")]
+impl<'db, S> Merk<S>
+where
+    S: StorageContext<'db>,
+{
+    /// Rebuild the node index from the current tree state.
+    /// This should be called after loading a tree from storage or after
+    /// any tree modifications in list_mode.
+    /// Computes and caches both the node and its position for O(1) lookups.
+    pub(crate) fn rebuild_node_index(&self) {
+        let mut index = self.node_index.borrow_mut();
+        index.clear();
+        
+        if let Some(tree) = self.tree.take() {
+            // Start in-order traversal at position 0
+            Self::collect_nodes_with_positions(&tree, &mut index, 0);
+            self.tree.set(Some(tree));
+        }
+    }
+
+    /// Recursively collect all nodes into the index HashMap with their positions.
+    /// Performs in-order traversal to compute correct positional indices.
+    /// Returns the next available position after processing this subtree.
+    fn collect_nodes_with_positions(
+        node: &TreeNode,
+        index: &mut HashMap<Vec<u8>, (TreeNode, u64)>,
+        start_position: u64,
+    ) -> u64 {
+        let mut current_pos = start_position;
+        
+        // Process left subtree first (in-order traversal)
+        if let Some(left) = node.child(true) {
+            current_pos = Self::collect_nodes_with_positions(left, index, current_pos);
+        }
+        
+        // Process current node at current_pos
+        index.insert(node.key().to_vec(), (node.clone(), current_pos));
+        current_pos += 1;
+        
+        // Process right subtree
+        if let Some(right) = node.child(false) {
+            current_pos = Self::collect_nodes_with_positions(right, index, current_pos);
+        }
+        
+        current_pos
+    }
+
+    /// Get a node from the index by key.
+    pub(crate) fn get_node_from_index(&self, key: &[u8]) -> Option<TreeNode> {
+        self.node_index.borrow().get(key).map(|(node, _pos)| node.clone())
+    }
+
+    /// Get a node's position from the index by key.
+    /// Returns None if the key is not in the index.
+    /// This provides O(1) position lookup for keys in list_mode trees.
+    pub fn get_key_position(&self, key: &[u8]) -> Option<u64> {
+        self.node_index.borrow().get(key).map(|(_node, pos)| *pos)
+    }
+}
 
 #[cfg(test)]
 mod test {

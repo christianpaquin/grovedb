@@ -195,6 +195,13 @@ impl Document {
 
     /// Find the actual position of a UUID in the Merk tree by trying positions
     fn find_actual_tree_position(&self, uuid: &[u8]) -> Result<usize> {
+        // Use indexed position lookup
+        if let Some(position) = self.merk.get_key_position(uuid) {
+            return Ok(position as usize);
+        }
+        
+        // Fallback: scan positions if index lookup fails (shouldn't happen)
+        // This is kept for robustness but should rarely be used
         use grovedb_merk::proofs::positional::verify_positional_proof;
         
         // Get current root hash for verification
