@@ -195,22 +195,40 @@ cargo test --features list_mode test_apply_list_batch_insert_after_key_with_key
 # Result: ok. 1 passed; 0 failed
 ```
 
+## Performance Optimizations (✅ IMPLEMENTED)
+
+Merk now includes built-in performance optimizations for `list_mode`:
+
+1. **Node Index for O(1) Lookups** - ✅ Implemented
+   - `HashMap<Vec<u8>, (TreeNode, u64)>` caches nodes and their positions
+   - Eliminates O(n) tree traversal on every `InsertAfterKey` operation
+   - Automatically rebuilt after tree modifications
+   - Public API: `merk.get_key_position(key)` for O(1) position lookups
+
+2. **Position Caching** - ✅ Implemented
+   - Index stores pre-computed positions during in-order traversal
+   - Eliminates O(log n) parent chain walks for position discovery
+   - Demo uses `get_key_position()` for fast position lookups
+
+**Performance Impact:**
+- InsertAfterKey operations: O(n) → O(1) for node fetch
+- Position discovery: O(log n) → O(1) for indexed keys
+- Batch operations: O(n × m) → O(n + m) for m operations on n-node tree
+
+See `merk/src/merk/list_ops.rs` for implementation details.
+
 ## Next Steps (Optional Enhancements)
 
-1. **Performance optimization:**
-   - Add UUID→position index (HashMap/BTreeMap) for O(1) lookups
-   - Currently O(n) cache scan (fast enough for demo scale)
-
-2. **Make InsertAfterKeyWithKey more robust:**
+1. **Make InsertAfterKeyWithKey more robust:**
    - Handle structural changes from tombstone operations
    - Alternative tree traversal methods
    - Currently works but can fail after delete+reinsert
 
-3. **Additional operations:**
+2. **Additional operations:**
    - `UpdateValueByKey` for more efficient tombstone updates
    - Currently uses batch: [DeleteAtPosition, InsertAtPositionWithKey]
 
-4. **End-to-end testing:**
+3. **End-to-end testing:**
    - Multi-client stress testing
    - Large document performance testing
    - Conflict resolution scenarios

@@ -97,7 +97,7 @@ TypeScript + Vite application:
 Axum-based server that:
 - Maintains Merk tree with `list_mode` feature
 - Accepts reference-based operations (client sends `target_uuid`)
-- Maintains character cache for fast UUID→position lookups
+- Uses Merk's built-in node index for O(1) UUID→position lookups
 - Converts `target_uuid` to tree position before applying operation
 - Handles insert/delete operations with client-provided UUIDs
 - Generates Merkle proofs using `merk.prove_position()`
@@ -222,6 +222,8 @@ Following Matt Weidner's ["Text Without CRDTs"](https://mattweidner.com/2025/05/
 - **Latency**: WebSocket round-trip only (no verification delay with mock)
 - **Scalability**: Logarithmic proof size O(log n)
 - **Optimistic updates**: Characters appear instantly (client generates UUID)
+- **Position lookups**: O(1) via Merk's built-in node index (see `merk.get_key_position()`)
+- **InsertAfterKey operations**: O(1) node fetch (index-based, not tree traversal)
 
 ## Development
 
