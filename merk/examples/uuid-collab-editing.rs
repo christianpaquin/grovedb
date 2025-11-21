@@ -1,6 +1,6 @@
 // UUID-Based Collaborative Editing Demo
 // "Text Without CRDTs" Pattern
-// 
+//
 // This demo implements Matt Weidner's "Text Without CRDTs" pattern using GroveDB Merk's
 // InsertAfterKey operation. Unlike traditional position-based editing, each character
 // has a stable UUID that never changes. Edits reference these UUIDs, enabling true
@@ -14,7 +14,7 @@
 //
 // See `uuid-collab-edit-with-proofs` for a version with proofs
 
-use grovedb_merk::{Merk, ListOp, MerkType, TreeType};
+use grovedb_merk::{ListOp, Merk, MerkType, TreeType};
 use grovedb_path::SubtreePath;
 use grovedb_storage::{rocksdb_storage::test_utils::TempStorage, Storage, StorageBatch};
 use grovedb_version::version::GroveVersion;
@@ -117,10 +117,8 @@ impl UuidDocument {
         }
 
         // Apply to Merk tree and get back the UUIDs
-        let cost_result = self
-            .merk
-            .apply_list_batch(&ops, &self.grove_version);
-        
+        let cost_result = self.merk.apply_list_batch(&ops, &self.grove_version);
+
         let result = cost_result
             .value
             .map_err(|e| format!("batch operation failed: {:?}", e))?;
@@ -176,11 +174,13 @@ impl UuidDocument {
         println!("{}", "-".repeat(70));
         println!("Document: \"{}\"", content);
         println!("Character count: {}", self.characters.len());
-        
+
         if !self.characters.is_empty() && self.characters.len() <= 20 {
             println!("\nCharacter UUIDs (first 8 bytes shown):");
             for (i, ch) in self.characters.iter().enumerate() {
-                let uuid_preview: Vec<String> = ch.uuid.iter()
+                let uuid_preview: Vec<String> = ch
+                    .uuid
+                    .iter()
                     .take(8)
                     .map(|b| format!("{:02x}", b))
                     .collect();
@@ -201,7 +201,7 @@ fn main() {
 
     // Create simulated remote users
     let mut alice = RemoteUser::new("Alice", "\x1b[34m"); // Blue
-    let mut bob = RemoteUser::new("Bob", "\x1b[32m");     // Green
+    let mut bob = RemoteUser::new("Bob", "\x1b[32m"); // Green
     let mut carol = RemoteUser::new("Carol", "\x1b[35m"); // Magenta
 
     // === Scenario 1: Alice creates the initial document ===
@@ -328,7 +328,7 @@ fn main() {
     // Bob adds "!!!" after 'o'
     println!("Bob prepares to add '!!!' after 'o'");
     let bob_ops = vec![bob.type_after_uuid('!', &uuid_o)];
-    
+
     // Carol inserts '*' after first 'l' (concurrent!)
     println!("Carol prepares to insert '*' after first 'l' (concurrently)");
     let carol_ops = vec![carol.type_after_uuid('*', &uuid_first_l)];

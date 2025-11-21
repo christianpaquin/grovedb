@@ -1,11 +1,14 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 
 #[cfg(feature = "list_mode")]
-use std::collections::HashMap;
+use std::cell::RefCell;
 
 use grovedb_costs::CostResult;
 use grovedb_storage::StorageContext;
 use grovedb_version::version::GroveVersion;
+
+#[cfg(feature = "list_mode")]
+use super::KeyCache;
 
 use crate::{
     tree::kv::ValueDefinedCostType,
@@ -27,7 +30,7 @@ where
             merk_type,
             tree_type,
             #[cfg(feature = "list_mode")]
-            node_index: RefCell::new(HashMap::new()),
+            key_cache: RefCell::new(KeyCache::new()),
         }
     }
 
@@ -47,7 +50,7 @@ where
             merk_type: StandaloneMerk,
             tree_type,
             #[cfg(feature = "list_mode")]
-            node_index: RefCell::new(HashMap::new()),
+            key_cache: RefCell::new(KeyCache::new()),
         };
 
         merk.load_base_root(value_defined_cost_fn, grove_version)
@@ -70,7 +73,7 @@ where
             merk_type: BaseMerk,
             tree_type,
             #[cfg(feature = "list_mode")]
-            node_index: RefCell::new(HashMap::new()),
+            key_cache: RefCell::new(KeyCache::new()),
         };
 
         merk.load_base_root(value_defined_cost_fn, grove_version)
@@ -94,7 +97,7 @@ where
             merk_type: LayeredMerk,
             tree_type,
             #[cfg(feature = "list_mode")]
-            node_index: RefCell::new(HashMap::new()),
+            key_cache: RefCell::new(KeyCache::new()),
         };
 
         merk.load_root(value_defined_cost_fn, grove_version)

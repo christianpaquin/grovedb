@@ -1,9 +1,9 @@
 // Collaborative Editing Demo
-// 
+//
 // This demo simulates multiple users collaboratively editing a document using
 // Merk's list-mode batch operations API. It demonstrates:
 // - Multiple simulated users typing concurrently
-// - Efficient batch operations for character insertion  
+// - Efficient batch operations for character insertion
 // - Document state visualization after each user action
 // - Atomic multi-operation commits
 //
@@ -79,7 +79,7 @@ impl Document {
     }
 
     /// Apply a batch of operations atomically
-    /// 
+    ///
     /// In the real implementation, this would call:
     /// ```
     /// merk.apply_list_batch(&ops, &grove_version)
@@ -142,7 +142,7 @@ fn main() {
 
     // Create simulated users with colors
     let alice = User::new("Alice", "\x1b[34m"); // Blue
-    let bob = User::new("Bob", "\x1b[32m");     // Green
+    let bob = User::new("Bob", "\x1b[32m"); // Green
     let carol = User::new("Carol", "\x1b[35m"); // Magenta
 
     // === Scenario 1: Initial document creation ===
@@ -216,7 +216,7 @@ fn main() {
     // Bob adds emphasis
     let mut ops = bob.type_text("*** ", 0);
     doc.apply_operations(ops);
-    
+
     let current_len = doc.len();
     ops = bob.type_text(" ***", current_len as u64);
     doc.apply_operations(ops);
@@ -225,7 +225,7 @@ fn main() {
     // Carol replaces a word (delete "Awesome", insert "Amazing")
     let mut ops = carol.delete_range(8, 8); // Delete "Awesome " (8 chars at position 4+4)
     doc.apply_operations(ops);
-    
+
     ops = carol.type_text("Amazing ", 8);
     doc.apply_operations(ops);
     doc.display("After Carol's word replacement");
@@ -233,12 +233,20 @@ fn main() {
     // === Final summary ===
     println!("\nFinal Document Summary\n");
     println!("The document has been collaboratively edited by:");
-    println!("  {}• Alice{} (Blue) - Created initial text, made corrections", alice.color, "\x1b[0m");
-    println!("  {}• Bob{} (Green) - Added text, emphasis", bob.color, "\x1b[0m");
-    println!("  {}• Carol{} (Magenta) - Made additions, replacements", carol.color, "\x1b[0m");
+    println!(
+        "  {}• Alice{} (Blue) - Created initial text, made corrections",
+        alice.color, "\x1b[0m"
+    );
+    println!(
+        "  {}• Bob{} (Green) - Added text, emphasis",
+        bob.color, "\x1b[0m"
+    );
+    println!(
+        "  {}• Carol{} (Magenta) - Made additions, replacements",
+        carol.color, "\x1b[0m"
+    );
     println!();
     doc.display("FINAL DOCUMENT");
 
     println!();
-
 }

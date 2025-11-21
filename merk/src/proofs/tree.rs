@@ -11,10 +11,10 @@ use grovedb_costs::{
 
 #[cfg(any(feature = "minimal", feature = "verify"))]
 use super::{Node, Op};
-#[cfg(any(feature = "minimal", feature = "verify"))]
-use crate::tree::{combine_hash, kv_digest_to_kv_hash, kv_hash, node_hash, value_hash, NULL_HASH};
 #[cfg(all(any(feature = "minimal", feature = "verify"), feature = "list_mode"))]
 use crate::tree::node_hash_list_mode;
+#[cfg(any(feature = "minimal", feature = "verify"))]
+use crate::tree::{combine_hash, kv_digest_to_kv_hash, kv_hash, node_hash, value_hash, NULL_HASH};
 #[cfg(any(feature = "minimal", feature = "verify"))]
 use crate::{error::Error, tree::CryptoHash};
 #[cfg(feature = "minimal")]
@@ -84,11 +84,15 @@ pub struct Tree {
 impl From<Node> for Tree {
     /// Creates a childless tree with the target node as the `node` field.
     fn from(node: Node) -> Self {
+        let height_hint = match &node {
+            Node::HashWithSubtreeSize(_, _, Some(height)) => (*height).max(1) as usize,
+            _ => 1,
+        };
         Self {
             node,
             left: None,
             right: None,
-            height: 1,
+            height: height_hint,
             child_heights: (0, 0),
         }
     }
@@ -111,27 +115,18 @@ impl Tree {
         }
 
         #[cfg(feature = "list_mode")]
-        fn compute_hash_list_mode(tree: &Tree, kv_hash: CryptoHash, subtree_size: u64) -> CostContext<CryptoHash> {
-            // For list-mode proofs, use node_hash_list_mode with None for parent_key
-            // since proofs don't include parent information
+        fn compute_hash_list_mode(
+            tree: &Tree,
+            kv_hash: CryptoHash,
+            subtree_size: u64,
+            parent_key: &Option<Vec<u8>>,
+        ) -> CostContext<CryptoHash> {
             let left_hash = tree.child_hash(true);
             let right_hash = tree.child_hash(false);
-            
-            #[cfg(test)]
-            eprintln!("[HASH] Computing list-mode hash: kv_hash={:?}, left={:?}, right={:?}, size={}", 
-                kv_hash, left_hash, right_hash, subtree_size);
-            
-            let result = node_hash_list_mode(
-                &kv_hash,
-                &left_hash,
-                &right_hash,
-                subtree_size,
-                &None,
-            );
-            
-            #[cfg(test)]
-            eprintln!("[HASH] Result: {:?}", result.value);
-            
+
+            let result =
+                node_hash_list_mode(&kv_hash, &left_hash, &right_hash, subtree_size, parent_key);
+
             result
         }
 
@@ -158,41 +153,75 @@ impl Tree {
                 kv_digest_to_kv_hash(key.as_slice(), &combined_value_hash)
                     .flat_map(|kv_hash| compute_hash(self, kv_hash))
             }
-            // List-mode variants with subtree_size
-            Node::HashWithSubtreeSize(hash, _) => {
-                // For list-mode, hash already includes subtree_size in computation
-                (*hash).wrap_with_cost(Default::default())
-            }
+            // List-mode variants with subtree_size metadata
+            Node::HashWithSubtreeSize(hash, _, _) => (*hash).wrap_with_cost(Default::default()),
             #[cfg(feature = "list_mode")]
-            Node::KVWithSubtreeSize(key, value, size) => {
-                // For list-mode, compute kv_hash then use node_hash_list_mode
+            Node::KVWithSubtreeSize(key, value, size, parent_key) => {
                 kv_hash(key.as_slice(), value.as_slice())
-                    .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size))
+                    .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size, parent_key))
             }
             #[cfg(not(feature = "list_mode"))]
-            Node::KVWithSubtreeSize(key, value, _) => {
-                // Fallback if list_mode feature not enabled (shouldn't happen)
-                kv_hash(key.as_slice(), value.as_slice())
+            Node::KVWithSubtreeSize(key, value, _, _) => kv_hash(key.as_slice(), value.as_slice())
+                .flat_map(|kv_hash| compute_hash(self, kv_hash)),
+            #[cfg(feature = "list_mode")]
+            Node::KVValueHashWithSubtreeSize(key, _, value_hash, size, parent_key)
+            | Node::KVValueHashFeatureTypeWithSubtreeSize(
+                key,
+                _,
+                value_hash,
+                _,
+                size,
+                parent_key,
+            ) => kv_digest_to_kv_hash(key.as_slice(), value_hash)
+                .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size, parent_key)),
+            #[cfg(not(feature = "list_mode"))]
+            Node::KVValueHashWithSubtreeSize(key, _, value_hash, _, _)
+            | Node::KVValueHashFeatureTypeWithSubtreeSize(key, _, value_hash, _, _, _) => {
+                kv_digest_to_kv_hash(key.as_slice(), value_hash)
                     .flat_map(|kv_hash| compute_hash(self, kv_hash))
             }
             #[cfg(feature = "list_mode")]
-            Node::KVValueHashWithSubtreeSize(key, _, value_hash, size) => {
-                // For list-mode with value hash, use node_hash_list_mode
-                #[cfg(test)]
-                eprintln!("[HASH] KVValueHashWithSubtreeSize: key={:?}, value_hash={:?}, size={}", 
-                    String::from_utf8_lossy(key.as_slice()), value_hash, size);
-                
-                kv_digest_to_kv_hash(key.as_slice(), value_hash)
-                    .flat_map(|kv_hash| {
-                        #[cfg(test)]
-                        eprintln!("[HASH] Computed kv_hash: {:?}", kv_hash);
-                        compute_hash_list_mode(self, kv_hash, *size)
-                    })
+            Node::KVRefValueHashWithSubtreeSize(
+                key,
+                referenced_value,
+                node_value_hash,
+                size,
+                parent_key,
+            ) => {
+                let mut cost = OperationCost::default();
+                let referenced_value_hash =
+                    value_hash(referenced_value.as_slice()).unwrap_add_cost(&mut cost);
+                let combined_value_hash = combine_hash(node_value_hash, &referenced_value_hash)
+                    .unwrap_add_cost(&mut cost);
+
+                kv_digest_to_kv_hash(key.as_slice(), &combined_value_hash)
+                    .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size, parent_key))
             }
             #[cfg(not(feature = "list_mode"))]
-            Node::KVValueHashWithSubtreeSize(key, _, value_hash, _) => {
-                // Fallback if list_mode feature not enabled (shouldn't happen)
-                kv_digest_to_kv_hash(key.as_slice(), value_hash)
+            Node::KVRefValueHashWithSubtreeSize(key, referenced_value, node_value_hash, _, _) => {
+                let mut cost = OperationCost::default();
+                let referenced_value_hash =
+                    value_hash(referenced_value.as_slice()).unwrap_add_cost(&mut cost);
+                let combined_value_hash = combine_hash(node_value_hash, &referenced_value_hash)
+                    .unwrap_add_cost(&mut cost);
+
+                kv_digest_to_kv_hash(key.as_slice(), &combined_value_hash)
+                    .flat_map(|kv_hash| compute_hash(self, kv_hash))
+            }
+            #[cfg(feature = "list_mode")]
+            Node::KVHashWithSubtreeSize(kv_hash, size, parent_key) => {
+                compute_hash_list_mode(self, *kv_hash, *size, parent_key)
+            }
+            #[cfg(not(feature = "list_mode"))]
+            Node::KVHashWithSubtreeSize(kv_hash, _, _) => compute_hash(self, *kv_hash),
+            #[cfg(feature = "list_mode")]
+            Node::KVDigestWithSubtreeSize(key, value_hash, size, parent_key) => {
+                kv_digest_to_kv_hash(key, value_hash)
+                    .flat_map(|kv_hash| compute_hash_list_mode(self, kv_hash, *size, parent_key))
+            }
+            #[cfg(not(feature = "list_mode"))]
+            Node::KVDigestWithSubtreeSize(key, value_hash, _, _) => {
+                kv_digest_to_kv_hash(key, value_hash)
                     .flat_map(|kv_hash| compute_hash(self, kv_hash))
             }
         }
@@ -569,9 +598,12 @@ where
 
     let tree = stack.pop().unwrap();
 
-    if tree.child_heights.0.max(tree.child_heights.1)
-        - tree.child_heights.0.min(tree.child_heights.1)
-        > 1
+    let skip_avl_check = matches!(&tree.node, Node::HashWithSubtreeSize(_, _, Some(_)));
+
+    if !skip_avl_check
+        && tree.child_heights.0.max(tree.child_heights.1)
+            - tree.child_heights.0.min(tree.child_heights.1)
+            > 1
     {
         return Err(Error::InvalidProofError(
             "Expected proof to result in a valid avl tree".to_string(),

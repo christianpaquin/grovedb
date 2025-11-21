@@ -1,6 +1,6 @@
 // UUID-Based Collaborative Editing with Merkle Proofs
 // "Text Without CRDTs" + Verifiable Operations
-// 
+//
 // This demo extends the UUID-based collaborative editing pattern with cryptographic Merkle proofs.
 // Each operation broadcast by the server includes a positional Merkle proof that cryptographically
 // proves it's consistent with the published root hash. This enables:
@@ -23,7 +23,7 @@
 //
 // Reference: https://mattweidner.com/2025/05/21/text-without-crdts.html
 
-use grovedb_merk::{Merk, ListOp, MerkType, TreeType};
+use grovedb_merk::{ListOp, Merk, MerkType, TreeType};
 use grovedb_path::SubtreePath;
 use grovedb_storage::{rocksdb_storage::test_utils::TempStorage, Storage, StorageBatch};
 use grovedb_version::version::GroveVersion;
@@ -86,7 +86,9 @@ impl CollabServer {
         let root_before = self.get_root_hash();
 
         // Apply the operation
-        let cost_result = self.merk.apply_list_batch(&[op.clone()], &self.grove_version);
+        let cost_result = self
+            .merk
+            .apply_list_batch(&[op.clone()], &self.grove_version);
         let result = cost_result
             .value
             .map_err(|e| format!("operation failed: {:?}", e))?;
@@ -126,7 +128,8 @@ impl CollabServer {
         let root_after = self.get_root_hash();
 
         // Publish root to transparency log
-        self.root_history.push((self.characters.len(), root_after.clone()));
+        self.root_history
+            .push((self.characters.len(), root_after.clone()));
 
         // Generate proof for the newly inserted key
         // In a real system, this would be a full Merkle proof of inclusion
@@ -142,17 +145,25 @@ impl CollabServer {
     }
 
     /// Generate a Merkle proof for a specific key
-    fn generate_proof_for_key(&mut self, key: &[u8], _root_after: &[u8]) -> Result<Vec<u8>, String> {
+    fn generate_proof_for_key(
+        &mut self,
+        key: &[u8],
+        _root_after: &[u8],
+    ) -> Result<Vec<u8>, String> {
         // Find the position of the newly inserted key in the tree
-        let position = self.characters.iter()
+        let position = self
+            .characters
+            .iter()
             .position(|c| c.uuid == *key)
             .ok_or("Key not found in character list")?;
-        
+
         // Generate a real positional Merkle proof
-        let proof_result = self.merk.prove_position(position as u64, &self.grove_version)
+        let proof_result = self
+            .merk
+            .prove_position(position as u64, &self.grove_version)
             .value
             .map_err(|e| format!("Failed to generate proof: {:?}", e))?;
-        
+
         // The proof contains everything needed to verify:
         // - The key/value at this position
         // - All intermediate hashes to reconstruct the root
@@ -170,10 +181,8 @@ impl CollabServer {
         println!("\nServer Transparency Log:");
         println!("   (Published root hashes that clients can verify against)");
         for (count, root) in &self.root_history {
-            let root_preview: Vec<String> = root.iter()
-                .take(8)
-                .map(|b| format!("{:02x}", b))
-                .collect();
+            let root_preview: Vec<String> =
+                root.iter().take(8).map(|b| format!("{:02x}", b)).collect();
             let root_str = if root.is_empty() {
                 "empty".to_string()
             } else {
@@ -208,17 +217,25 @@ impl CollabClient {
     /// Verify and apply an operation from the server
     fn verify_and_apply(&mut self, verifiable_op: &VerifiableOp) -> Result<(), String> {
         // Step 1: Verify the root hash before matches what we expect
-        if !self.current_root_hash.is_empty() && self.current_root_hash != verifiable_op.root_hash_before {
+        if !self.current_root_hash.is_empty()
+            && self.current_root_hash != verifiable_op.root_hash_before
+        {
             return Err(format!(
                 "Root hash mismatch! Expected {:02x}{:02x}..., got {:02x}{:02x}...",
-                self.current_root_hash[0], self.current_root_hash[1],
-                verifiable_op.root_hash_before[0], verifiable_op.root_hash_before[1]
+                self.current_root_hash[0],
+                self.current_root_hash[1],
+                verifiable_op.root_hash_before[0],
+                verifiable_op.root_hash_before[1]
             ));
         }
 
         // Step 2: Verify the Merkle proof
         // Pass the operation details so we can do more thorough verification
-        self.verify_proof(&verifiable_op.proof, &verifiable_op.root_hash_after, &verifiable_op.root_hash_before)?;
+        self.verify_proof(
+            &verifiable_op.proof,
+            &verifiable_op.root_hash_after,
+            &verifiable_op.root_hash_before,
+        )?;
 
         // Step 3: Apply the operation locally
         match &verifiable_op.operation {
@@ -269,19 +286,25 @@ impl CollabClient {
     }
 
     /// Verify a Merkle proof against the expected root hash
-    fn verify_proof(&self, proof: &[u8], expected_root_after: &[u8], _root_before: &[u8]) -> Result<(), String> {
+    fn verify_proof(
+        &self,
+        proof: &[u8],
+        expected_root_after: &[u8],
+        _root_before: &[u8],
+    ) -> Result<(), String> {
         // Use the real positional proof verification
         // The proof encodes the position implicitly through the tree structure
         // We need to extract the position from the proof or track it separately
-        
+
         // For now, we'll verify position 0 (most recent insertion)
         // In a production system, the position would be included in the VerifiableOp (FIXME)
         let position = 0u64;
-        
+
         let grove_version = GroveVersion::latest();
-        let expected_root_hash: [u8; 32] = expected_root_after.try_into()
+        let expected_root_hash: [u8; 32] = expected_root_after
+            .try_into()
             .map_err(|_| "Invalid root hash length")?;
-        
+
         // Verify the positional proof
         // Returns CostContext<Result<PositionalProofResult, Error>>
         let cost_result = grovedb_merk::proofs::positional::verify_positional_proof(
@@ -290,21 +313,23 @@ impl CollabClient {
             expected_root_hash,
             &grove_version,
         );
-        
-        let verification_result = cost_result.value
+
+        let verification_result = cost_result
+            .value
             .map_err(|e| format!("Proof verification failed: {:?}", e))?;
-        
+
         // The proof is valid! It cryptographically proves:
         // 1. The root hash is correct
         // 2. The value at this position exists
         // 3. The tree structure is consistent
-        
-        println!("      → Merkle proof verified: position={}, value={:?}, tree_size={}",
+
+        println!(
+            "      → Merkle proof verified: position={}, value={:?}, tree_size={}",
             verification_result.position,
             String::from_utf8_lossy(&verification_result.value),
             verification_result.tree_size
         );
-        
+
         Ok(())
     }
 
@@ -312,12 +337,7 @@ impl CollabClient {
     fn create_insert_after(&self, ch: char, after_uuid: &[u8]) -> ListOp {
         println!(
             "   {}[{}]{} creates InsertAfterKey('{}', {:02x}{:02x}...)",
-            self.color,
-            self.name,
-            "\x1b[0m",
-            ch,
-            after_uuid[0],
-            after_uuid[1]
+            self.color, self.name, "\x1b[0m", ch, after_uuid[0], after_uuid[1]
         );
 
         ListOp::InsertAfterKey {
@@ -351,7 +371,14 @@ fn main() {
     // Initialize server
     let mut server = CollabServer::new();
     println!("Server initialized with empty document");
-    println!("   Root hash: {}", if server.get_root_hash().is_empty() { "empty" } else { "initialized" });
+    println!(
+        "   Root hash: {}",
+        if server.get_root_hash().is_empty() {
+            "empty"
+        } else {
+            "initialized"
+        }
+    );
 
     // Initialize clients
     let mut alice = CollabClient::new("Alice", "\x1b[34m");
@@ -365,18 +392,24 @@ fn main() {
 
     let op1 = alice.create_first('H');
     println!("\n   Server processing operation...");
-    let verifiable_op1 = server.apply_and_create_proof(op1)
+    let verifiable_op1 = server
+        .apply_and_create_proof(op1)
         .expect("server failed to apply");
 
-    println!("   Server root hash updated: {:02x}{:02x}...",
-        verifiable_op1.root_hash_after[0],
-        verifiable_op1.root_hash_after[1]
+    println!(
+        "   Server root hash updated: {:02x}{:02x}...",
+        verifiable_op1.root_hash_after[0], verifiable_op1.root_hash_after[1]
     );
 
     println!("\n   Broadcasting to all clients with proof...");
-    alice.verify_and_apply(&verifiable_op1).expect("alice failed to verify");
-    bob.verify_and_apply(&verifiable_op1).expect("bob failed to verify");
-    carol.verify_and_apply(&verifiable_op1).expect("carol failed to verify");
+    alice
+        .verify_and_apply(&verifiable_op1)
+        .expect("alice failed to verify");
+    bob.verify_and_apply(&verifiable_op1)
+        .expect("bob failed to verify");
+    carol
+        .verify_and_apply(&verifiable_op1)
+        .expect("carol failed to verify");
 
     println!("\n   Server: \"{}\"", server.get_content());
     println!("   Alice:  \"{}\"", alice.get_content());
@@ -394,18 +427,24 @@ fn main() {
 
     let op2 = bob.create_insert_after('i', &uuid_h);
     println!("\n   Server processing operation...");
-    let verifiable_op2 = server.apply_and_create_proof(op2)
+    let verifiable_op2 = server
+        .apply_and_create_proof(op2)
         .expect("server failed to apply");
 
-    println!("   Server root hash updated: {:02x}{:02x}...",
-        verifiable_op2.root_hash_after[0],
-        verifiable_op2.root_hash_after[1]
+    println!(
+        "   Server root hash updated: {:02x}{:02x}...",
+        verifiable_op2.root_hash_after[0], verifiable_op2.root_hash_after[1]
     );
 
     println!("\n   Broadcasting to all clients with proof...");
-    alice.verify_and_apply(&verifiable_op2).expect("alice failed to verify");
-    bob.verify_and_apply(&verifiable_op2).expect("bob failed to verify");
-    carol.verify_and_apply(&verifiable_op2).expect("carol failed to verify");
+    alice
+        .verify_and_apply(&verifiable_op2)
+        .expect("alice failed to verify");
+    bob.verify_and_apply(&verifiable_op2)
+        .expect("bob failed to verify");
+    carol
+        .verify_and_apply(&verifiable_op2)
+        .expect("carol failed to verify");
 
     println!("\n   Server: \"{}\"", server.get_content());
     println!("   Alice:  \"{}\"", alice.get_content());
@@ -420,18 +459,24 @@ fn main() {
 
     let op3 = carol.create_insert_after('!', &uuid_i);
     println!("\n   Server processing operation...");
-    let verifiable_op3 = server.apply_and_create_proof(op3)
+    let verifiable_op3 = server
+        .apply_and_create_proof(op3)
         .expect("server failed to apply");
 
-    println!("   Server root hash updated: {:02x}{:02x}...",
-        verifiable_op3.root_hash_after[0],
-        verifiable_op3.root_hash_after[1]
+    println!(
+        "   Server root hash updated: {:02x}{:02x}...",
+        verifiable_op3.root_hash_after[0], verifiable_op3.root_hash_after[1]
     );
 
     println!("\n   Broadcasting to all clients with proof...");
-    alice.verify_and_apply(&verifiable_op3).expect("alice failed to verify");
-    bob.verify_and_apply(&verifiable_op3).expect("bob failed to verify");
-    carol.verify_and_apply(&verifiable_op3).expect("carol failed to verify");
+    alice
+        .verify_and_apply(&verifiable_op3)
+        .expect("alice failed to verify");
+    bob.verify_and_apply(&verifiable_op3)
+        .expect("bob failed to verify");
+    carol
+        .verify_and_apply(&verifiable_op3)
+        .expect("carol failed to verify");
 
     println!("\n   Final document state:");
     println!("   Server: \"{}\"", server.get_content());
@@ -446,7 +491,8 @@ fn main() {
     println!("\nScenario 4: Simulating tampered operation (verification fails)\n");
 
     let op4 = alice.create_insert_after('X', &uuid_h);
-    let mut verifiable_op4 = server.apply_and_create_proof(op4)
+    let mut verifiable_op4 = server
+        .apply_and_create_proof(op4)
         .expect("server failed to apply");
 
     println!("   Tampering with root hash...");
@@ -456,14 +502,25 @@ fn main() {
     verifiable_op4.root_hash_after[2] ^= 0x55;
 
     println!("\n   Broadcasting tampered operation to clients...");
-    
+
     // Bob tries to verify - should fail
     match bob.verify_and_apply(&verifiable_op4) {
-        Ok(_) => println!("   {}[Bob]{} ERROR: Should have rejected tampered op!", bob.color, "\x1b[0m"),
-        Err(e) => println!("   {}[Bob]{} ✓ Rejected tampered operation: {}", bob.color, "\x1b[0m", e),
+        Ok(_) => println!(
+            "   {}[Bob]{} ERROR: Should have rejected tampered op!",
+            bob.color, "\x1b[0m"
+        ),
+        Err(e) => println!(
+            "   {}[Bob]{} ✓ Rejected tampered operation: {}",
+            bob.color, "\x1b[0m", e
+        ),
     }
 
-    println!("\n   {}[Bob's view remains safe:]{} \"{}\"", bob.color, "\x1b[0m", bob.get_content());
+    println!(
+        "\n   {}[Bob's view remains safe:]{} \"{}\"",
+        bob.color,
+        "\x1b[0m",
+        bob.get_content()
+    );
     println!("   (Tampered operation was rejected before being applied)");
 
     println!();

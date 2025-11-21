@@ -85,15 +85,34 @@ pub enum Node {
     /// current tree node
     KVRefValueHash(Vec<u8>, Vec<u8>, CryptoHash),
 
-    // List-mode variants with subtree_size for positional proofs
+    // List-mode variants with subtree_size metadata
     /// Represents the hash and subtree_size of a tree node (for list-mode)
-    HashWithSubtreeSize(CryptoHash, u64),
+    HashWithSubtreeSize(CryptoHash, u64, Option<u8>),
 
-    /// Represents the key/value pair and subtree_size of a tree node (for list-mode)
-    KVWithSubtreeSize(Vec<u8>, Vec<u8>, u64),
+    /// Represents the key/value pair, subtree_size, and optional parent key of a tree node (for list-mode)
+    KVWithSubtreeSize(Vec<u8>, Vec<u8>, u64, Option<Vec<u8>>),
 
-    /// Represents the key, value, value_hash and subtree_size of a tree node (for list-mode)
-    KVValueHashWithSubtreeSize(Vec<u8>, Vec<u8>, CryptoHash, u64),
+    /// Represents the key, value, value_hash, subtree_size, and optional parent key of a tree node (for list-mode)
+    KVValueHashWithSubtreeSize(Vec<u8>, Vec<u8>, CryptoHash, u64, Option<Vec<u8>>),
+
+    /// Represents the key, value, value_hash, feature_type, subtree_size, and optional parent key of a tree node (for list-mode)
+    KVValueHashFeatureTypeWithSubtreeSize(
+        Vec<u8>,
+        Vec<u8>,
+        CryptoHash,
+        TreeFeatureType,
+        u64,
+        Option<Vec<u8>>,
+    ),
+
+    /// Represents the key, referenced value, node value hash, subtree_size, and optional parent key (for list-mode)
+    KVRefValueHashWithSubtreeSize(Vec<u8>, Vec<u8>, CryptoHash, u64, Option<Vec<u8>>),
+
+    /// Represents the KV hash of a node plus subtree_size and optional parent key (for list-mode)
+    KVHashWithSubtreeSize(CryptoHash, u64, Option<Vec<u8>>),
+
+    /// Represents the key/value_hash pair and subtree_size plus optional parent key of a node (for list-mode)
+    KVDigestWithSubtreeSize(Vec<u8>, CryptoHash, u64, Option<Vec<u8>>),
 }
 
 use std::fmt;
@@ -131,24 +150,105 @@ impl fmt::Display for Node {
                 hex::encode(value_hash),
                 feature_type
             ),
-            Node::HashWithSubtreeSize(hash, size) => {
-                format!("HashWithSubtreeSize(HASH[{}], size={})", hex::encode(hash), size)
-            }
-            Node::KVWithSubtreeSize(key, value, size) => {
+            Node::HashWithSubtreeSize(hash, size, maybe_height) => {
+                let height_desc = maybe_height
+                    .map(|h| h.to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string());
                 format!(
-                    "KVWithSubtreeSize({}, {}, size={})",
-                    hex_to_ascii(key),
-                    hex_to_ascii(value),
-                    size
+                    "HashWithSubtreeSize(HASH[{}], size={}, height={})",
+                    hex::encode(hash),
+                    size,
+                    height_desc
                 )
             }
-            Node::KVValueHashWithSubtreeSize(key, value, value_hash, size) => format!(
-                "KVValueHashWithSubtreeSize({}, {}, HASH[{}], size={})",
-                hex_to_ascii(key),
-                hex_to_ascii(value),
-                hex::encode(value_hash),
-                size
-            ),
+            Node::KVWithSubtreeSize(key, value, size, parent_key) => {
+                let parent_desc = parent_key
+                    .as_ref()
+                    .map(|pk| hex_to_ascii(pk))
+                    .unwrap_or_else(|| "<None>".to_string());
+                format!(
+                    "KVWithSubtreeSize({}, {}, size={}, parent_key={})",
+                    hex_to_ascii(key),
+                    hex_to_ascii(value),
+                    size,
+                    parent_desc
+                )
+            }
+            Node::KVValueHashWithSubtreeSize(key, value, value_hash, size, parent_key) => {
+                let parent_desc = parent_key
+                    .as_ref()
+                    .map(|pk| hex_to_ascii(pk))
+                    .unwrap_or_else(|| "<None>".to_string());
+                format!(
+                    "KVValueHashWithSubtreeSize({}, {}, HASH[{}], size={}, parent_key={})",
+                    hex_to_ascii(key),
+                    hex_to_ascii(value),
+                    hex::encode(value_hash),
+                    size,
+                    parent_desc
+                )
+            }
+            Node::KVValueHashFeatureTypeWithSubtreeSize(
+                key,
+                value,
+                value_hash,
+                feature_type,
+                size,
+                parent_key,
+            ) => {
+                let parent_desc = parent_key
+                    .as_ref()
+                    .map(|pk| hex_to_ascii(pk))
+                    .unwrap_or_else(|| "<None>".to_string());
+                format!(
+                    "KVValueHashFeatureTypeWithSubtreeSize({}, {}, HASH[{}], {:?}, size={}, parent_key={})",
+                    hex_to_ascii(key),
+                    hex_to_ascii(value),
+                    hex::encode(value_hash),
+                    feature_type,
+                    size,
+                    parent_desc
+                )
+            }
+            Node::KVRefValueHashWithSubtreeSize(key, value, value_hash, size, parent_key) => {
+                let parent_desc = parent_key
+                    .as_ref()
+                    .map(|pk| hex_to_ascii(pk))
+                    .unwrap_or_else(|| "<None>".to_string());
+                format!(
+                    "KVRefValueHashWithSubtreeSize({}, {}, HASH[{}], size={}, parent_key={})",
+                    hex_to_ascii(key),
+                    hex_to_ascii(value),
+                    hex::encode(value_hash),
+                    size,
+                    parent_desc
+                )
+            }
+            Node::KVHashWithSubtreeSize(hash, size, parent_key) => {
+                let parent_desc = parent_key
+                    .as_ref()
+                    .map(|pk| hex_to_ascii(pk))
+                    .unwrap_or_else(|| "<None>".to_string());
+                format!(
+                    "KVHashWithSubtreeSize(HASH[{}], size={}, parent_key={})",
+                    hex::encode(hash),
+                    size,
+                    parent_desc
+                )
+            }
+            Node::KVDigestWithSubtreeSize(key, value_hash, size, parent_key) => {
+                let parent_desc = parent_key
+                    .as_ref()
+                    .map(|pk| hex_to_ascii(pk))
+                    .unwrap_or_else(|| "<None>".to_string());
+                format!(
+                    "KVDigestWithSubtreeSize({}, HASH[{}], size={}, parent_key={})",
+                    hex_to_ascii(key),
+                    hex::encode(value_hash),
+                    size,
+                    parent_desc
+                )
+            }
         };
         write!(f, "{}", node_string)
     }

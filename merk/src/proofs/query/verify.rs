@@ -309,7 +309,11 @@ impl Query {
                     }
                     execute_node(key, Some(value), *value_hash)?;
                 }
-                Node::Hash(_) | Node::KVHash(_) | Node::KVValueHashFeatureType(..) => {
+                Node::Hash(_)
+                | Node::KVHash(_)
+                | Node::KVValueHashFeatureType(..)
+                | Node::KVHashWithSubtreeSize(..)
+                | Node::KVValueHashFeatureTypeWithSubtreeSize(..) => {
                     if in_range {
                         return Err(Error::InvalidProofError(format!(
                             "Proof is missing data for query range. Encountered unexpected node \
@@ -320,21 +324,35 @@ impl Query {
                 }
                 // List-mode variants - treat similarly to their non-list counterparts
                 // (subtree_size is for positional proofs, not key-based queries)
-                Node::KVWithSubtreeSize(key, value, _size) => {
+                Node::KVWithSubtreeSize(key, value, _size, _) => {
                     #[cfg(feature = "proof_debug")]
                     {
                         println!("Processing KVWithSubtreeSize node");
                     }
                     execute_node(key, Some(value), value_hash(value).unwrap())?;
                 }
-                Node::KVValueHashWithSubtreeSize(key, value, value_hash, _size) => {
+                Node::KVValueHashWithSubtreeSize(key, value, value_hash, _size, _) => {
                     #[cfg(feature = "proof_debug")]
                     {
                         println!("Processing KVValueHashWithSubtreeSize node");
                     }
                     execute_node(key, Some(value), *value_hash)?;
                 }
-                Node::HashWithSubtreeSize(_hash, _size) => {
+                Node::KVDigestWithSubtreeSize(key, value_hash, _size, _) => {
+                    #[cfg(feature = "proof_debug")]
+                    {
+                        println!("Processing KVDigestWithSubtreeSize node");
+                    }
+                    execute_node(key, None, *value_hash)?;
+                }
+                Node::KVRefValueHashWithSubtreeSize(key, value, value_hash, _size, _) => {
+                    #[cfg(feature = "proof_debug")]
+                    {
+                        println!("Processing KVRefValueHashWithSubtreeSize node");
+                    }
+                    execute_node(key, Some(value), *value_hash)?;
+                }
+                Node::HashWithSubtreeSize(_hash, _size, _) => {
                     if in_range {
                         return Err(Error::InvalidProofError(format!(
                             "Proof is missing data for query range. Encountered unexpected node \

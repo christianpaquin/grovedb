@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use grovedb_merk::{Merk, ListOp, MerkType, TreeType};
+use grovedb_merk::{ListOp, Merk, MerkType, TreeType};
 use grovedb_path::SubtreePath;
 use grovedb_storage::{rocksdb_storage::test_utils::TempStorage, Storage, StorageBatch};
 use grovedb_version::version::GroveVersion;
@@ -195,41 +195,11 @@ impl Document {
 
     /// Find the actual position of a UUID in the Merk tree by trying positions
     fn find_actual_tree_position(&self, uuid: &[u8]) -> Result<usize> {
-        // Use indexed position lookup
-        if let Some(position) = self.merk.get_key_position(uuid) {
-            return Ok(position as usize);
-        }
-        
-        // Fallback: scan positions if index lookup fails (shouldn't happen)
-        // This is kept for robustness but should rarely be used
-        use grovedb_merk::proofs::positional::verify_positional_proof;
-        
-        // Get current root hash for verification
-        let root_hash = self.merk.root_hash().value;
-        
-        // Try positions 0 to tree size
-        let tree_size = self.characters.len();
-        for pos in 0..=tree_size {
-            // Generate proof at this position
-            match self.merk.prove_position(pos as u64, &self.grove_version).value {
-                Ok(proof_construction) => {
-                    // Verify the proof to extract the key
-                    match verify_positional_proof(
-                        &proof_construction.proof,
-                        pos as u64,
-                        root_hash,
-                        &self.grove_version
-                    ).value {
-                        Ok(proof_result) if proof_result.key == uuid => {
-                            return Ok(pos);
-                        }
-                        _ => continue,
-                    }
-                }
-                Err(_) => continue, // Position might be out of bounds, try next
-            }
-        }
-        Err(anyhow!("Could not find UUID in tree at any position"))
+        self
+            .merk
+            .get_key_position(uuid)
+            .map(|pos| pos as usize)
+            .ok_or_else(|| anyhow!("Could not find UUID in tree at any position"))
     }
 
     /// Find the position of a UUID in the character cache
@@ -241,7 +211,7 @@ impl Document {
     }
 
     /// Delete a character by UUID (reference-based operation)
-    /// Returns the UUID, new root hash, and a positional proof
+    /// Returns the UUID, new root hash, and a KEY-BASED proof (not positional)
     pub fn delete_by_uuid(&mut self, uuid: Vec<u8>) -> Result<(Vec<u8>, [u8; 32], Vec<u8>)> {
         // Find the character with this UUID
         let tree_position = self.find_uuid_position(&uuid)?;
@@ -253,26 +223,25 @@ impl Document {
 
         let value = character.value;
 
-        // Mark as deleted using UpdateValueByKey (in-place update, no structural changes)
-        // This is more efficient than delete+reinsert and keeps tree structure stable
         let op = ListOp::UpdateValueByKey {
             key: uuid.clone(),
-            value: encode_value(value, true),  // Mark as deleted (tombstone)
+            value: encode_value(value, true),
         };
 
-        // Apply the update operation
-        self.merk.apply_list_batch(&[op], &self.grove_version)
+        self.merk
+            .apply_list_batch(&[op], &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to mark as deleted: {:?}", e))?;
 
-        // Find the actual position of the UUID in the tree after update
+        // Generate a positional proof for the UUID's actual position (tombstone)
         let actual_tree_position = self.find_actual_tree_position(&uuid)?;
-
-        // Generate proof at the ACTUAL tree position
-        let proof_result = self.merk.prove_position(actual_tree_position as u64, &self.grove_version)
+        let proof_result = self
+            .merk
+            .prove_position(actual_tree_position as u64, &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to generate proof: {:?}", e))?;
 
+        // Get root hash AFTER prove() to see if order matters
         let root_hash = self.merk.root_hash().value;
 
         // Update local cache to mark as deleted (at the cached tree position)
@@ -359,28 +328,21 @@ impl Document {
         let uuid = character.uuid.clone();
         let value = character.value;
 
-        // To mark as deleted, we need to:
-        // 1. Delete the existing entry
-        // 2. Re-insert with the same UUID but marked as deleted
-        // This is done as a batch operation to maintain atomicity
-        let ops = vec![
-            ListOp::DeleteAtPosition {
-                position: tree_position as u64,
-            },
-            ListOp::InsertAtPositionWithKey {
-                position: tree_position as u64,
-                key: uuid.clone(),
-                value: encode_value(value, true),  // Mark as deleted (tombstone)
-            },
-        ];
+        let op = ListOp::UpdateValueByKey {
+            key: uuid.clone(),
+            value: encode_value(value, true),
+        };
 
-        // Apply the batch operation
-        self.merk.apply_list_batch(&ops, &self.grove_version)
+        self.merk
+            .apply_list_batch(&[op], &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to mark as deleted: {:?}", e))?;
 
-        // Generate proof AFTER marking as deleted (at tree position)
-        let proof_result = self.merk.prove_position(tree_position as u64, &self.grove_version)
+        // Generate proof AFTER marking as deleted using actual tree position
+        let actual_tree_position = self.find_actual_tree_position(&uuid)?;
+        let proof_result = self
+            .merk
+            .prove_position(actual_tree_position as u64, &self.grove_version)
             .value
             .map_err(|e| anyhow!("Failed to generate proof: {:?}", e))?;
 
@@ -408,6 +370,33 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grovedb_merk::proofs::positional::verify_positional_proof;
+
+    fn assert_positional_proof_contains(
+        proof: &[u8],
+        uuid: &[u8],
+        expected_flag: u8,
+        expected_char: Option<char>,
+        root: [u8; 32],
+        grove_version: &GroveVersion,
+    ) {
+        for position in 0..1000u64 {
+            let result = verify_positional_proof(proof, position, root, grove_version).value;
+            match result {
+                Ok(proof_result) if proof_result.key == uuid => {
+                    assert!(proof_result.value.len() >= 2);
+                    assert_eq!(proof_result.value[0], expected_flag);
+                    if let Some(ch) = expected_char {
+                        assert_eq!(proof_result.value[1], ch as u8);
+                    }
+                    return;
+                }
+                Ok(_) => continue,
+                Err(_) => continue,
+            }
+        }
+        panic!("positional proof did not resolve to target uuid");
+    }
 
     #[test]
     fn test_empty_document() {
@@ -494,5 +483,135 @@ mod tests {
         let content = doc.get_content();
         let text: String = content.iter().map(|(_, c)| c).collect();
         assert_eq!(text, "ac");
+    }
+
+    #[test]
+    fn test_reference_flow_matches_auditor() {
+        use grovedb_merk::proofs::positional::verify_positional_proof;
+
+        fn verify_insert(
+            proof: &[u8],
+            uuid: &[u8],
+            value: char,
+            root: [u8; 32],
+            grove_version: &GroveVersion,
+        ) {
+            for position in 0..1000u64 {
+                match verify_positional_proof(proof, position, root, grove_version).value {
+                    Ok(result) if result.key == uuid => {
+                        assert_eq!(result.value, vec![0, value as u8]);
+                        return;
+                    }
+                    Ok(_) => continue,
+                    Err(_) => continue,
+                }
+            }
+            panic!("positional proof did not resolve to target uuid");
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(temp.path()).unwrap();
+
+        let uuid_a = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let (key_a, root_a, proof_a) = doc
+            .insert_after(None, uuid_a.clone(), 'A')
+            .expect("insert A");
+        verify_insert(&proof_a, &key_a, 'A', root_a, &doc.grove_version);
+
+        let uuid_b = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let (key_b, root_b, proof_b) = doc
+            .insert_after(Some(uuid_a.clone()), uuid_b.clone(), 'B')
+            .expect("insert B");
+        verify_insert(&proof_b, &key_b, 'B', root_b, &doc.grove_version);
+
+        let uuid_c = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let (key_c, root_c, proof_c) = doc
+            .insert_after(Some(uuid_b.clone()), uuid_c.clone(), 'C')
+            .expect("insert C");
+        verify_insert(&proof_c, &key_c, 'C', root_c, &doc.grove_version);
+
+        let (deleted_c, _root_delete, _delete_proof) = doc
+            .delete_by_uuid(uuid_c.clone())
+            .expect("delete C");
+        assert_eq!(deleted_c, uuid_c);
+
+        let uuid_d = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let (key_d, root_d, proof_d) = doc
+            .insert_after(Some(uuid_b.clone()), uuid_d.clone(), 'D')
+            .expect("insert D");
+        assert!(doc.merk.get_key_position(&key_d).is_some());
+        verify_insert(&proof_d, &key_d, 'D', root_d, &doc.grove_version);
+
+        let uuid_e = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let (key_e, root_e, proof_e) = doc
+            .insert_after(Some(uuid_d.clone()), uuid_e.clone(), 'E')
+            .expect("insert E");
+        verify_insert(&proof_e, &key_e, 'E', root_e, &doc.grove_version);
+    }
+
+    #[test]
+    fn test_delete_key_proof_contains_tombstone() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(temp.path()).unwrap();
+
+        let uuid = uuid::Uuid::new_v4().as_bytes().to_vec();
+        let (inserted_uuid, _, _) =
+            doc.insert_after(None, uuid.clone(), 'x').expect("insert x");
+
+        let (deleted_uuid, delete_root, delete_proof) =
+            doc.delete_by_uuid(inserted_uuid.clone()).expect("delete x");
+        assert_eq!(deleted_uuid, uuid);
+
+        assert_positional_proof_contains(
+            &delete_proof,
+            &uuid,
+            1,
+            Some('x'),
+            delete_root,
+            &doc.grove_version,
+        );
+    }
+
+    #[test]
+    fn test_delete_proof_after_subsequent_ops_verifies() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut doc = Document::new(temp.path()).unwrap();
+
+        let uuid_a = uuid::Uuid::parse_str("4077b53e-1409-45d9-8b86-f1a9f8277ef6")
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        let (uuid_a, _, _) = doc
+            .insert_after(None, uuid_a, 'A')
+            .expect("insert A");
+
+        let uuid_b = uuid::Uuid::parse_str("eb9d9c3a-721a-45be-a1ad-1d0cdc9be8be")
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        doc.insert_after(Some(uuid_a.clone()), uuid_b.clone(), 'B')
+            .expect("insert B");
+
+        doc.delete_by_uuid(uuid_b.clone()).expect("delete B");
+
+        let uuid_c = uuid::Uuid::parse_str("13212858-f697-47a1-a407-932ca55b8bec")
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        doc.insert_after(Some(uuid_a.clone()), uuid_c.clone(), '!')
+            .expect("insert C");
+
+        let (deleted_uuid, delete_root, delete_proof) =
+            doc.delete_by_uuid(uuid_a.clone()).expect("delete A");
+        assert_eq!(deleted_uuid, uuid_a);
+
+        assert_positional_proof_contains(
+            &delete_proof,
+            &uuid_a,
+            1,
+            Some('A'),
+            delete_root,
+            &doc.grove_version,
+        );
     }
 }

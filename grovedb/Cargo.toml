@@ -90,6 +90,10 @@ grovedbg = [
     "zip-extensions",
     "tempfile"
 ]
+test_utils = [
+    "minimal",
+    "grovedb-merk/test_utils",
+]
 
 [build-dependencies]
 hex-literal = "0.4.1"

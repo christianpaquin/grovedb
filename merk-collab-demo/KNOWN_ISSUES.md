@@ -74,11 +74,11 @@ The merk-collab-demo is **working end-to-end**! You can run the server and clien
 - Solution: Query tree after insertion to find actual position
 - Ensures proofs contain correct UUID at correct position
 
-**Benefits**:
-- ✅ Pure reference-based (Matt Weidner's design)
-- ✅ Reliable after tombstone operations (UpdateValueByKey = no structural change)
-- ✅ Correct proofs (position discovered, not predicted)
-- ✅ Client generates UUIDs (zero-latency typing)
+- **Benefits**:
+    - ✅ Reference-based inserts (Matt Weidner's design)
+    - ✅ Reference-based deletions via `UpdateValueByKey` (in-place tombstones)
+    - ✅ Proofs are generated after discovering the actual tree position
+    - ✅ Clients generate UUIDs (zero-latency typing)
 
 **Performance considerations**:
 - Position discovery is O(n) scan of tree (acceptable for demo scale)
@@ -140,27 +140,19 @@ InsertMultipleAtPosition {
 }
 ```
 
-#### 4. **Auditor Tool** (Optional)
+#### 4. **Auditor Tool**
 
-**Current**: Not implemented
+**Current**: Implemented in `merk-collab-demo/auditor`. It streams `changelog.jsonl`, base64-decodes each proof, and calls `verify_positional_proof` to replay the document history.
 
-**Future**: Standalone Rust tool to verify changelog
-
-**Would do**:
-```rust
-// Read changelog.jsonl line by line
-// For each entry:
-//   1. Deserialize: [op_index, op, proof, new_root_hash]
-//   2. Verify proof against previous root hash
-//   3. Update root hash for next iteration
-//   4. Report any mismatches
+**Usage**:
+```bash
+cargo run -p merk-collab-demo-auditor -- changelog.jsonl
 ```
 
-**Benefits**:
-- Independent verification of server behavior
-- Catch server bugs or tampering
-- Compliance/audit requirements
-- Demonstrates external verification capability
+**What it verifies**:
+- Proof matches the advertised new root hash
+- Insert/delete payloads agree with tombstone flags
+- Root hash is advanced sequentially so tampering is caught
 
 #### 5. **Conflict Resolution**
 

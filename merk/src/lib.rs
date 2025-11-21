@@ -86,13 +86,13 @@ pub use tree_type::MaybeTree;
 #[cfg(any(feature = "minimal", feature = "verify"))]
 pub use tree_type::TreeType;
 
+#[cfg(all(feature = "full", feature = "list_mode"))]
+pub use crate::merk::list_ops::{ListBatchResult, ListOp};
 #[cfg(feature = "minimal")]
 pub use crate::merk::{
     defaults::ROOT_KEY_KEY,
     prove::{ProofConstructionResult, ProofWithoutEncodingResult},
     KVIterator, Merk, MerkType, RootHashKeyAndAggregateData,
 };
-#[cfg(all(feature = "full", feature = "list_mode"))]
-pub use crate::merk::list_ops::{ListOp, ListBatchResult};
 #[cfg(feature = "minimal")]
 pub use crate::visualize::VisualizeableMerk;

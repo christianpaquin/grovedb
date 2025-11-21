@@ -175,11 +175,12 @@ impl TreeNode {
         grove_version: &GroveVersion,
     ) -> ed::Result<()> {
         #[cfg(feature = "list_mode")]
-        let (mut tree_inner, list_mode, subtree_size, parent_key) = if input.first() == Some(&0xFF) {
+        let (mut tree_inner, list_mode, subtree_size, parent_key) = if input.first() == Some(&0xFF)
+        {
             if input.len() < 1 + 8 + 1 {
                 return Err(ed::Error::UnexpectedByte(0xFF));
             }
-            let mut sz_bytes = [0u8;8];
+            let mut sz_bytes = [0u8; 8];
             sz_bytes.copy_from_slice(&input[1..9]);
             let subtree_size = u64::from_le_bytes(sz_bytes);
             let parent_key = if input[9] == 0x01 {
@@ -226,9 +227,12 @@ impl TreeNode {
         grove_version: &GroveVersion,
     ) -> ed::Result<Self> {
         #[cfg(feature = "list_mode")]
-        let (mut tree_inner, list_mode, subtree_size, parent_key) = if input.first() == Some(&0xFF) {
-            if input.len() < 1 + 8 + 1 { return Err(ed::Error::UnexpectedByte(0xFF)); }
-            let mut sz_bytes = [0u8;8];
+        let (mut tree_inner, list_mode, subtree_size, parent_key) = if input.first() == Some(&0xFF)
+        {
+            if input.len() < 1 + 8 + 1 {
+                return Err(ed::Error::UnexpectedByte(0xFF));
+            }
+            let mut sz_bytes = [0u8; 8];
             sz_bytes.copy_from_slice(&input[1..9]);
             let subtree_size = u64::from_le_bytes(sz_bytes);
             let parent_key = if input[9] == 0x01 {
@@ -244,7 +248,9 @@ impl TreeNode {
             let offset = 1 + 8 + 1 + if parent_key.is_some() { 16 } else { 0 };
             let decoded: TreeNodeInner = Decode::decode(&input[offset..])?;
             (decoded, true, subtree_size, parent_key)
-        } else { (Decode::decode(input)?, false, 1u64, None) };
+        } else {
+            (Decode::decode(input)?, false, 1u64, None)
+        };
         #[cfg(not(feature = "list_mode"))]
         let mut tree_inner: TreeNodeInner = Decode::decode(input)?;
         tree_inner.kv.key = key;
@@ -252,7 +258,7 @@ impl TreeNode {
             tree_inner.kv.value_defined_cost =
                 value_defined_cost_fn(tree_inner.kv.value.as_slice(), grove_version);
         }
-    let t = TreeNode::new_with_tree_inner(tree_inner);
+        let t = TreeNode::new_with_tree_inner(tree_inner);
         #[cfg(feature = "list_mode")]
         {
             let mut t = t;
@@ -381,7 +387,8 @@ mod tests {
         assert_eq!(enc[0], 0xFF, "sentinel must be first byte");
         assert_eq!(enc.len(), node.encoding_length());
         // subtree size bytes should match 1
-        let mut sz_bytes = [0u8;8]; sz_bytes.copy_from_slice(&enc[1..9]);
+        let mut sz_bytes = [0u8; 8];
+        sz_bytes.copy_from_slice(&enc[1..9]);
         assert_eq!(u64::from_le_bytes(sz_bytes), 1u64);
         // parent_key should be None (0x00)
         assert_eq!(enc[9], 0x00, "parent_key flag should be 0x00 for None");
@@ -389,8 +396,9 @@ mod tests {
             node.key().to_vec(),
             &enc,
             None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
-            &GroveVersion::default()
-        ).unwrap();
+            &GroveVersion::default(),
+        )
+        .unwrap();
         assert!(dec.list_mode);
         assert_eq!(dec.subtree_size(), 1);
         assert_eq!(dec.key(), node.key());
@@ -406,22 +414,28 @@ mod tests {
         let parent_uuid = Uuid::new_v4().as_bytes().to_vec();
         node.parent_key = Some(parent_uuid.clone());
         node.subtree_size = 3;
-        
+
         let enc = node.encode();
         assert_eq!(enc[0], 0xFF, "sentinel must be first byte");
         // subtree size
-        let mut sz_bytes = [0u8;8]; sz_bytes.copy_from_slice(&enc[1..9]);
+        let mut sz_bytes = [0u8; 8];
+        sz_bytes.copy_from_slice(&enc[1..9]);
         assert_eq!(u64::from_le_bytes(sz_bytes), 3u64);
         // parent_key should be Some (0x01 + 16 bytes)
         assert_eq!(enc[9], 0x01, "parent_key flag should be 0x01 for Some");
-        assert_eq!(&enc[10..26], parent_uuid.as_slice(), "parent UUID should match");
-        
+        assert_eq!(
+            &enc[10..26],
+            parent_uuid.as_slice(),
+            "parent UUID should match"
+        );
+
         let dec = TreeNode::decode(
             node.key().to_vec(),
             &enc,
             None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
-            &GroveVersion::default()
-        ).unwrap();
+            &GroveVersion::default(),
+        )
+        .unwrap();
         assert!(dec.list_mode);
         assert_eq!(dec.subtree_size(), 3);
         assert_eq!(dec.parent_key.as_ref().unwrap(), &parent_uuid);

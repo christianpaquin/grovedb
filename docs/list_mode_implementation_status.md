@@ -123,6 +123,13 @@ Merk's list mode uses a non-BST tree structure with persisted parent pointers fo
   - `test_apply_list_batch_persistence`: Storage round-trip verification
   - `test_apply_list_batch_cost_tracking`: Operation cost accounting
 
+**How to run them:**
+```bash
+cargo test -p grovedb-merk --features full,list_mode -- list_ops::tests
+```
+
+The explicit module filter ensures Cargo executes the list-mode batch suite instead of reporting "0 tests" (which happens if you pass a bare `list_ops` filter).
+
 **Test Results:**
 - 14 tests for batch operations (11 existing + 3 new InsertAfterKey tests)
 - 9 tests currently passing
@@ -176,6 +183,7 @@ ListOp Operations:
 - `InsertAtPositionWithKey { position, key, value }`: Insert with explicit key
 - `DeleteAtPosition { position }`: Delete and return key/value
 - `InsertAfterKey { target_key, value }`: UUID-based insertion (fully supported in batch)
+- `UpdateValueByKey { key, value }`: In-place key lookups (e.g., tombstones without structural churn) — powering the merk-collab-demo's reference-based deletions
 
 **"Text Without CRDTs" Pattern - Production Ready:**
 - InsertAfterKey fully supported in batch operations
@@ -267,6 +275,13 @@ Future Optimizations:
 - 10/13 tests passing (77% success rate)
 - 3 tests disabled with documented limitations (value extraction in complex multi-leaf proofs)
 - Tests cover: single elements, multiple nodes, boundary cases, tampered proofs, wrong root hash, empty tree, identical values
+
+**Run them with:**
+```bash
+cargo test -p grovedb-merk --features full,list_mode -- proofs::positional
+```
+
+Use the module-qualified filter so Cargo executes the positional suite instead of silently matching zero tests.
 
 **Working Demo:**
 - `merk/examples/uuid-collab-edit-with-proofs.rs` (472 lines)

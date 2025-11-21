@@ -141,24 +141,24 @@ where
     }
 
     /// Creates a Merkle proof for the element at the given position in a list-mode tree.
-    /// 
+    ///
     /// This generates a positional proof that proves an element exists at a specific
     /// 0-based index in the tree's in-order traversal. The proof includes subtree_size
     /// metadata for each node along the path, enabling position-based verification.
-    /// 
+    ///
     /// # Arguments
     /// * `position` - The 0-based position to prove (0 = first element)
     /// * `grove_version` - Version for hash computation
-    /// 
+    ///
     /// # Returns
     /// `ProofConstructionResult` containing the encoded proof and any limit information
-    /// 
+    ///
     /// # Errors
     /// Returns `Error` if:
     /// - Tree is not in list mode
     /// - Position is out of bounds
     /// - Tree is empty
-    /// 
+    ///
     /// # Example
     /// ```ignore
     /// let proof_result = merk.prove_position(5, &grove_version)?;
@@ -179,7 +179,7 @@ where
     }
 
     /// Creates a Merkle proof for the element at the given position without encoding.
-    /// 
+    ///
     /// This is the internal implementation of positional proof generation.
     /// Returns the proof in an intermediate format (LinkedList of ProofOp) before encoding.
     #[cfg(feature = "list_mode")]

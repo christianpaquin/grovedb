@@ -45,10 +45,13 @@ pub mod restore;
 pub mod source;
 
 use std::{
-    cell::{Cell, RefCell},
-    collections::{BTreeMap, BTreeSet, HashMap, LinkedList},
+    cell::Cell,
+    collections::{BTreeMap, BTreeSet, LinkedList},
     fmt,
 };
+
+#[cfg(feature = "list_mode")]
+use std::{cell::RefCell, collections::HashMap};
 
 use committer::MerkCommitter;
 use grovedb_costs::{
@@ -286,11 +289,8 @@ pub struct Merk<S> {
     pub merk_type: MerkType,
     /// The tree type
     pub tree_type: TreeType,
-    /// Node index for O(1) lookups in list_mode operations
-    /// Maps UUID keys to (TreeNode, position) for efficient InsertAfterKey operations
-    /// and O(1) position lookups for proof generation
     #[cfg(feature = "list_mode")]
-    pub(crate) node_index: RefCell<HashMap<Vec<u8>, (TreeNode, u64)>>,
+    pub(crate) key_cache: RefCell<KeyCache>,
 }
 
 impl<S> fmt::Debug for Merk<S> {
@@ -617,8 +617,8 @@ where
                 value_defined_cost_fn,
                 grove_version,
             )
-            .map_ok(|tree| {
-                self.tree = Cell::new(tree);
+            .map_ok(|tree_opt| {
+                self.tree.set(tree_opt);
             })
         } else {
             // The tree is empty
@@ -798,18 +798,29 @@ fn load_tree_recursively<'db>(
 
     // Load left child if it's a reference
     if let Some(link) = tree.link(true) {
-        if let Link::Reference { hash, child_heights, key, aggregate_data } = link {
+        if let Link::Reference {
+            hash,
+            child_heights,
+            key,
+            aggregate_data,
+        } = link
+        {
             let key = key.clone();
             let hash = *hash;
             let child_heights = *child_heights;
             let aggregate_data = *aggregate_data;
-            
-            let child_tree_result = fetch_node(db, &key, None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version);
+
+            let child_tree_result = fetch_node(
+                db,
+                &key,
+                None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
+                grove_version,
+            );
             let child_tree = match child_tree_result {
                 Ok(tree_opt) => tree_opt,
                 Err(e) => return Err(e).wrap_with_cost(cost),
             };
-            
+
             if let Some(child) = child_tree {
                 // Recursively load the child's children
                 let loaded_child = cost_return_on_error!(
@@ -829,18 +840,29 @@ fn load_tree_recursively<'db>(
 
     // Load right child if it's a reference
     if let Some(link) = tree.link(false) {
-        if let Link::Reference { hash, child_heights, key, aggregate_data } = link {
+        if let Link::Reference {
+            hash,
+            child_heights,
+            key,
+            aggregate_data,
+        } = link
+        {
             let key = key.clone();
             let hash = *hash;
             let child_heights = *child_heights;
             let aggregate_data = *aggregate_data;
-            
-            let child_tree_result = fetch_node(db, &key, None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version);
+
+            let child_tree_result = fetch_node(
+                db,
+                &key,
+                None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
+                grove_version,
+            );
             let child_tree = match child_tree_result {
                 Ok(tree_opt) => tree_opt,
                 Err(e) => return Err(e).wrap_with_cost(cost),
             };
-            
+
             if let Some(child) = child_tree {
                 // Recursively load the child's children
                 let loaded_child = cost_return_on_error!(
@@ -881,62 +903,58 @@ fn fetch_node<'db>(
 // // TODO: get rid of Fetch/source and use GroveDB storage_cost abstraction
 
 #[cfg(feature = "list_mode")]
+#[derive(Default)]
+pub(crate) struct KeyCache {
+    positions: HashMap<Vec<u8>, u64>,
+    tree_version: u64,
+}
+
+#[cfg(feature = "list_mode")]
+impl KeyCache {
+    fn new() -> Self {
+        Self {
+            positions: std::collections::HashMap::new(),
+            tree_version: 0,
+        }
+    }
+
+    fn clear(&mut self) {
+        self.positions.clear();
+        self.tree_version = self.tree_version.wrapping_add(1);
+    }
+
+    fn get(&self, key: &[u8]) -> Option<u64> {
+        self.positions.get(key).copied()
+    }
+
+    fn insert(&mut self, key: Vec<u8>, position: u64) {
+        self.positions.insert(key, position);
+    }
+}
+
+#[cfg(feature = "list_mode")]
 impl<'db, S> Merk<S>
 where
     S: StorageContext<'db>,
 {
-    /// Rebuild the node index from the current tree state.
-    /// This should be called after loading a tree from storage or after
-    /// any tree modifications in list_mode.
-    /// Computes and caches both the node and its position for O(1) lookups.
-    pub(crate) fn rebuild_node_index(&self) {
-        let mut index = self.node_index.borrow_mut();
-        index.clear();
-        
-        if let Some(tree) = self.tree.take() {
-            // Start in-order traversal at position 0
-            Self::collect_nodes_with_positions(&tree, &mut index, 0);
-            self.tree.set(Some(tree));
-        }
+    #[cfg(feature = "list_mode")]
+    fn invalidate_key_cache(&self) {
+        self.key_cache.borrow_mut().clear();
     }
 
-    /// Recursively collect all nodes into the index HashMap with their positions.
-    /// Performs in-order traversal to compute correct positional indices.
-    /// Returns the next available position after processing this subtree.
-    fn collect_nodes_with_positions(
-        node: &TreeNode,
-        index: &mut HashMap<Vec<u8>, (TreeNode, u64)>,
-        start_position: u64,
-    ) -> u64 {
-        let mut current_pos = start_position;
-        
-        // Process left subtree first (in-order traversal)
-        if let Some(left) = node.child(true) {
-            current_pos = Self::collect_nodes_with_positions(left, index, current_pos);
-        }
-        
-        // Process current node at current_pos
-        index.insert(node.key().to_vec(), (node.clone(), current_pos));
-        current_pos += 1;
-        
-        // Process right subtree
-        if let Some(right) = node.child(false) {
-            current_pos = Self::collect_nodes_with_positions(right, index, current_pos);
-        }
-        
-        current_pos
-    }
-
-    /// Get a node from the index by key.
-    pub(crate) fn get_node_from_index(&self, key: &[u8]) -> Option<TreeNode> {
-        self.node_index.borrow().get(key).map(|(node, _pos)| node.clone())
-    }
-
-    /// Get a node's position from the index by key.
-    /// Returns None if the key is not in the index.
-    /// This provides O(1) position lookup for keys in list_mode trees.
+    /// Determine the position for `key` using the in-memory tree metadata.
+    /// Returns `None` when the key is absent or no tree is loaded.
     pub fn get_key_position(&self, key: &[u8]) -> Option<u64> {
-        self.node_index.borrow().get(key).map(|(_node, pos)| *pos)
+        if let Some(position) = self.key_cache.borrow().get(key) {
+            return Some(position);
+        }
+
+        let position =
+            self.use_tree(|maybe_tree| maybe_tree.and_then(|tree| tree.position_of_key(key)));
+        if let Some(position) = position {
+            self.key_cache.borrow_mut().insert(key.to_vec(), position);
+        }
+        position
     }
 }
 

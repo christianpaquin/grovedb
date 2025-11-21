@@ -872,47 +872,134 @@ where
     #[allow(dead_code)]
     /// Creates a `Node::KV` from the key/value pair of the root node.
     pub(crate) fn to_kv_node(&self) -> Node {
-        Node::KV(
-            self.tree().key().to_vec(),
-            self.tree().value_as_slice().to_vec(),
-        )
+        let key = self.tree().key().to_vec();
+        let value = self.tree().value_as_slice().to_vec();
+
+        #[cfg(feature = "list_mode")]
+        {
+            if self.tree().is_list_mode() {
+                return Node::KVWithSubtreeSize(
+                    key,
+                    value,
+                    self.tree().subtree_size(),
+                    self.list_mode_parent_key(),
+                );
+            }
+        }
+
+        Node::KV(key, value)
     }
 
     /// Creates a `Node::KVValueHash` from the key/value pair of the root node.
     pub(crate) fn to_kv_value_hash_node(&self) -> Node {
-        Node::KVValueHash(
-            self.tree().key().to_vec(),
-            self.tree().value_ref().to_vec(),
-            *self.tree().value_hash(),
-        )
+        let key = self.tree().key().to_vec();
+        let value = self.tree().value_ref().to_vec();
+        let value_hash = *self.tree().value_hash();
+
+        #[cfg(feature = "list_mode")]
+        {
+            if self.tree().is_list_mode() {
+                return Node::KVValueHashWithSubtreeSize(
+                    key,
+                    value,
+                    value_hash,
+                    self.tree().subtree_size(),
+                    self.list_mode_parent_key(),
+                );
+            }
+        }
+
+        Node::KVValueHash(key, value, value_hash)
     }
 
     /// Creates a `Node::KVValueHashFeatureType` from the key/value pair of the
     /// root node
     pub(crate) fn to_kv_value_hash_feature_type_node(&self) -> Node {
-        Node::KVValueHashFeatureType(
-            self.tree().key().to_vec(),
-            self.tree().value_ref().to_vec(),
-            *self.tree().value_hash(),
-            self.tree().feature_type(),
-        )
+        let key = self.tree().key().to_vec();
+        let value = self.tree().value_ref().to_vec();
+        let value_hash = *self.tree().value_hash();
+        let feature_type = self.tree().feature_type();
+
+        #[cfg(feature = "list_mode")]
+        {
+            if self.tree().is_list_mode() {
+                return Node::KVValueHashFeatureTypeWithSubtreeSize(
+                    key,
+                    value,
+                    value_hash,
+                    feature_type,
+                    self.tree().subtree_size(),
+                    self.list_mode_parent_key(),
+                );
+            }
+        }
+
+        Node::KVValueHashFeatureType(key, value, value_hash, feature_type)
     }
 
     /// Creates a `Node::KVHash` from the hash of the key/value pair of the root
     /// node.
     pub(crate) fn to_kvhash_node(&self) -> Node {
-        Node::KVHash(*self.tree().kv_hash())
+        let kv_hash = *self.tree().kv_hash();
+
+        #[cfg(feature = "list_mode")]
+        {
+            if self.tree().is_list_mode() {
+                return Node::KVHashWithSubtreeSize(
+                    kv_hash,
+                    self.tree().subtree_size(),
+                    self.list_mode_parent_key(),
+                );
+            }
+        }
+
+        Node::KVHash(kv_hash)
     }
 
     /// Creates a `Node::KVDigest` from the key/value_hash pair of the root
     /// node.
     pub(crate) fn to_kvdigest_node(&self) -> Node {
-        Node::KVDigest(self.tree().key().to_vec(), *self.tree().value_hash())
+        let key = self.tree().key().to_vec();
+        let value_hash = *self.tree().value_hash();
+
+        #[cfg(feature = "list_mode")]
+        {
+            if self.tree().is_list_mode() {
+                return Node::KVDigestWithSubtreeSize(
+                    key,
+                    value_hash,
+                    self.tree().subtree_size(),
+                    self.list_mode_parent_key(),
+                );
+            }
+        }
+
+        Node::KVDigest(key, value_hash)
     }
 
     /// Creates a `Node::Hash` from the hash of the node.
     pub(crate) fn to_hash_node(&self) -> CostContext<Node> {
-        self.tree().hash().map(Node::Hash)
+        let hash = self.tree().hash();
+
+        #[cfg(feature = "list_mode")]
+        {
+            if self.tree().is_list_mode() {
+                let size = self.tree().subtree_size();
+                let height = self.tree().height();
+                return hash.map(|hash| Node::HashWithSubtreeSize(hash, size, Some(height)));
+            }
+        }
+
+        hash.map(Node::Hash)
+    }
+
+    #[cfg(feature = "list_mode")]
+    fn list_mode_parent_key(&self) -> Option<Vec<u8>> {
+        if self.tree().use_parent_pointers {
+            self.tree().parent_key.clone()
+        } else {
+            None
+        }
     }
 
     #[cfg(feature = "minimal")]
@@ -1119,6 +1206,12 @@ where
                 }
             })
         } else if let Some(link) = self.tree().link(left) {
+            debug_assert!(
+                !matches!(link, Link::Modified { .. }),
+                "Proof generation encountered Link::Modified for key {} on {} side",
+                hex::encode(self.tree().key()),
+                if left { "left" } else { "right" }
+            );
             let mut proof = LinkedList::new();
             proof.push_back(if params.left_to_right {
                 Op::Push(link.to_hash_node())

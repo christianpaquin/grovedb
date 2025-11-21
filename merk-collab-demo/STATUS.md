@@ -9,7 +9,7 @@ The demo is **ready to run**! Here's what's been accomplished:
 - ✅ **Runs and listens** on http://127.0.0.1:3000
 - ✅ **Real Merkle proofs** via `merk.prove_position()`
 - ✅ **WebSocket support** for real-time collaboration
-- ✅ **List operations** using Merk's list-mode with positional proofs
+- ✅ **List operations** using `InsertAfterKeyWithKey` inserts + `UpdateValueByKey` tombstones (positional proofs preserved)
 - ⚠️ **In-memory storage** (TempStorage - data lost on restart)
 
 ### Client (TypeScript + Vite)
@@ -17,8 +17,8 @@ The demo is **ready to run**! Here's what's been accomplished:
 - ✅ **WebSocket client** for real-time updates
 - ✅ **Client-generated UUIDs** for optimistic updates
 - ✅ **State management** with DocumentClient
-- ✅ **Verification logic ready** (waiting for WASM module)
-- ⚠️ **Mock proof verification** (WASM module build blocked by dependencies)
+- ⚠️ **Server-trusting mode**: proofs are displayed but not verified on the client
+- ⚠️ **No WASM verifier**: browser never parses Merkle proofs or signatures yet
 
 ### Documentation
 - ✅ README.md - Architecture overview
@@ -102,7 +102,8 @@ curl http://127.0.0.1:3000/document
 │  ┌──────────────────────────────────────────────────────────┐│
 │  │  Document (Merk)                                         ││
 │  │  - Full Merkle tree in memory (TempStorage)             ││
-│  │  - List operations: InsertAtPosition, DeleteAtPosition  ││
+│  │  - List operations: InsertAfterKeyWithKey inserts,      ││
+│  │                    UpdateValueByKey tombstones          ││
 │  │  - Proof generation: merk.prove_position()              ││
 │  │  - Characters cache: Vec<(uuid, char)>                  ││
 │  └──────────────────────────────────────────────────────────┘│
@@ -120,44 +121,24 @@ curl http://127.0.0.1:3000/document
 2. **Client-generated UUIDs**: Clients generate UUIDs locally for optimistic updates
 3. **Operations include proofs**: Every insert/delete has a positional Merkle proof
 4. **Clients track root hash**: Trust anchored in root hash
-5. **Proof verification**: Client has verification code ready but WASM module not built
-   - Server generates real cryptographic proofs using `merk.prove_position()`
-   - Client receives base64-encoded proofs with each operation
-   - Client would verify: operation is consistent with root hash
-   - Cryptographically proves: position and tree structure validity
-   - **Current status**: Falls back to mock verification (always returns `true`)
+5. **Proof verification**: Happens off-box today. Browsers accept all operations while the Rust auditor (optional) replays the changelog with `verify_positional_proof`.
+   - Server still generates real cryptographic proofs using `merk.prove_position()`
+   - Clients receive base64-encoded proofs but do not parse them yet
+   - Root hashes in the UI are informational; trust relies on the server or external auditors
 
 ## ⚠️ Current Limitations
 
-### 1. Mock Proof Verification
-**Status**: Client uses mock verification (always returns `true`)
+### 1. Client-Side Proof Verification
+**Status**: Not implemented. The browser increments a proof counter for telemetry but it never decodes or validates the `proof` bytes coming from the server.
 
-**Why WASM build fails**:
-- **UUID dependency**: The `list_mode` feature requires `uuid` crate for random key generation
-  - UUID needs RNG which requires platform-specific features (`js` feature for WASM)
-  - Proof verification doesn't actually need UUID generation
-- **RocksDB dependency**: The `minimal` feature includes `grovedb-storage` with RocksDB
-  - RocksDB is a native C++ library with `bzip2-sys` that can't compile to WASM
-  - Proof verification doesn't need storage at all
-- **Feature entanglement**: Attempted to create `list_mode_verify` feature but:
-  - Positional proof code depends on tree structures gated behind `minimal`
-  - Would require significant refactoring to separate verification from storage/tree manipulation
+**Implication**:
+- Clients fully trust the server’s ordering and proofs. Root hashes are shown for debugging only.
+- Proof verification currently happens via the optional Rust auditor (see `merk-collab-demo/auditor`).
 
-**What works**:
-- ✅ Server generates real cryptographic Merkle proofs
-- ✅ Proofs are base64-encoded and sent to clients  
-- ✅ Client has complete verification logic ready
-- ✅ Root hash updates correctly (clients track authoritative state)
-
-**What's missing**:
-- ❌ Client can't cryptographically verify proofs (WASM module not built)
-- ❌ Falls back to trusting all operations from server
-
-**Solutions**:
-1. **Refactor merk**: Separate verification code into WASM-compatible module
-2. **Pure JS implementation**: Rewrite verification logic in TypeScript
-3. **Server-side only**: Accept that clients trust the server (most realistic for demo)
-4. **Alternative architecture**: Use simpler proof format that's easier to verify in browser
+**Next steps if we ever need zero-trust clients**:
+1. Extract a WASM-safe verification crate that does not pull in RocksDB/uuid.
+2. Or re-implement positional proof verification in TypeScript/wasm-bindgen.
+3. Ship signature verification for user operations before enabling proof rejection in browsers.
 
 ### 2. In-Memory Storage
 - **Status**: Using TempStorage (data lost on restart)
@@ -186,11 +167,10 @@ curl http://127.0.0.1:3000/document
 - ✅ **Root hash tracking**: Clients maintain authoritative root hash
 - ✅ **Beautiful UI**: Clean, modern interface with status indicators
 - ✅ **Proper architecture**: Three-tier design (Client → Server → Merk tree)
-- ✅ **List operations**: Merk's list-mode works correctly with position-based operations
+- ✅ **List operations**: Reference-based inserts + in-place tombstone updates keep Merk proofs consistent
 - ✅ **Position tracking**: Accurate insert/delete at specific positions
-- ✅ **Verification code ready**: Client has all logic needed, just needs WASM module
-- ✅ **List operations**: Merk's list-mode works correctly
-- ✅ **Position tracking**: Accurate insert/delete at specific positions
+- ✅ **Auditable proofs**: Server emits positional proofs that the Rust auditor replays
+- ⚠️ **Browser verification pending**: Clients still display proof counts but trust the server
 
 ## 🚧 Next Steps (Optional Enhancements)
 
@@ -250,7 +230,7 @@ curl http://127.0.0.1:3000/document
 
 1. **Text Without CRDTs**: Server-authoritative collaborative editing
 2. **Merkle Proofs**: Cryptographic verification of operations
-3. **List-Mode Trees**: Position-based operations in Merkle trees
+3. **List-Mode Trees**: Reference-based operations backed by positional proofs
 4. **Real-Time Sync**: WebSocket-based collaboration
 5. **Minimal Client State**: Clients don't replicate the tree
 6. **Trust Minimization**: Operations verified against root hash

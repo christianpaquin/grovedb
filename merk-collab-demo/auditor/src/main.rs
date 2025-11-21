@@ -214,89 +214,115 @@ fn verify_operation(
         .decode(&entry.proof)
         .context("Failed to decode proof from base64")?;
 
-    // For reference-based operations, we need to extract the position from the proof
-    // The proof was generated for a specific position, but we don't know it from the changelog
-    // We'll verify by checking the UUID and value instead of position
-    
     // Parse the UUID
     let uuid = uuid::Uuid::parse_str(&entry.uuid)
         .context("Failed to parse UUID")?;
     let expected_key = uuid.as_bytes().to_vec();
 
-    // Try to verify the proof at various positions to find where this UUID exists
-    // In a real audit, we'd maintain a document state, but for this demo we'll just
-    // verify that the proof is valid for SOME position with our expected UUID
+    match entry.operation.as_str() {
+        "insert" => {
+            // For inserts, use positional proof verification
+            verify_insert_operation(&proof_bytes, &expected_key, entry.value, expected_root, grove_version)
+        },
+        "delete" => {
+            // For deletes, use key-based proof verification
+            verify_delete_operation(&proof_bytes, &expected_key, expected_root, grove_version)
+        },
+        _ => Err(anyhow!("Unknown operation type: {}", entry.operation))
+    }
+}
+
+fn verify_positional_membership(
+    proof_bytes: &[u8],
+    expected_key: &[u8],
+    expected_root: &[u8; 32],
+    grove_version: &GroveVersion,
+    expected_deleted_flag: u8,
+    expected_char: Option<char>,
+) -> Result<()> {
     let mut verified = false;
     let mut last_error = None;
-    
-    // Try positions 0-100 (sufficient for demo purposes)
-    for position in 0..100 {
-        let result = verify_positional_proof(
-            &proof_bytes,
-            position,
-            *expected_root,
-            grove_version,
-        )
-        .value;
-        
+
+    for position in 0..1000 {
+        let result = verify_positional_proof(proof_bytes, position, *expected_root, grove_version)
+            .value;
+
         match result {
             Ok(proof_result) if proof_result.key == expected_key => {
-                // Found it! Now verify the value
-                match entry.operation.as_str() {
-                    "insert" => {
-                        // Verify the value matches (tombstone format: [deleted_flag, char_byte])
-                        if let Some(val) = entry.value {
-                            // Expected format: [0, char_byte] for active character
-                            let expected_value = vec![0, val as u8];
-                            if proof_result.value != expected_value {
-                                let decoded = if proof_result.value.len() == 2 {
-                                    format!("[deleted={}, char='{}']", proof_result.value[0], proof_result.value[1] as char)
-                                } else {
-                                    format!("{:?}", proof_result.value)
-                                };
-                                return Err(anyhow!(
-                                    "Value mismatch: proof contains {} but expected [deleted=0, char='{}']",
-                                    decoded,
-                                    val
-                                ));
-                            }
-                        }
-                    },
-                    "delete" => {
-                        // The proof shows the state AFTER deletion (tombstone)
-                        // Value should be [1, char_byte] (deleted flag set)
-                        if proof_result.value.len() == 2 && proof_result.value[0] != 1 {
-                            return Err(anyhow!(
-                                "Delete proof should show tombstone (deleted=1), but got deleted={}",
-                                proof_result.value[0]
-                            ));
-                        }
-                    },
-                    _ => {}
+                if proof_result.value.len() != 2 {
+                    return Err(anyhow!(
+                        "Value format mismatch: expected 2 bytes but got {}",
+                        proof_result.value.len()
+                    ));
                 }
-                
+                let deleted_flag = proof_result.value[0];
+                if deleted_flag != expected_deleted_flag {
+                    return Err(anyhow!(
+                        "Unexpected deleted flag: expected {} but proof shows {}",
+                        expected_deleted_flag,
+                        deleted_flag
+                    ));
+                }
+                if let Some(ch) = expected_char {
+                    if proof_result.value[1] != ch as u8 {
+                        return Err(anyhow!(
+                            "Value mismatch: proof contains char '{}' but expected '{}'",
+                            proof_result.value[1] as char,
+                            ch
+                        ));
+                    }
+                }
                 verified = true;
                 break;
-            },
-            Ok(_) => {
-                // Valid proof but wrong UUID, keep trying
-                continue;
-            },
+            }
+            Ok(_) => continue,
             Err(e) => {
-                // Save error in case we don't find any valid position
                 last_error = Some(e);
                 continue;
             }
         }
     }
-    
+
     if !verified {
         if let Some(err) = last_error {
-            return Err(anyhow!("Proof verification failed: {:?}", err));
+            Err(anyhow!("Proof verification failed: {:?}", err))
         } else {
-            return Err(anyhow!("Could not find UUID {} in proof at any position", entry.uuid));
+            Err(anyhow!("Could not find UUID at any position in proof"))
         }
+    } else {
+        Ok(())
     }
+}
 
-    Ok(())
+fn verify_insert_operation(
+    proof_bytes: &[u8],
+    expected_key: &[u8],
+    value: Option<char>,
+    expected_root: &[u8; 32],
+    grove_version: &GroveVersion,
+) -> Result<()> {
+    verify_positional_membership(
+        proof_bytes,
+        expected_key,
+        expected_root,
+        grove_version,
+        0,
+        value,
+    )
+}
+
+fn verify_delete_operation(
+    proof_bytes: &[u8],
+    expected_key: &[u8],
+    expected_root: &[u8; 32],
+    grove_version: &GroveVersion,
+) -> Result<()> {
+    verify_positional_membership(
+        proof_bytes,
+        expected_key,
+        expected_root,
+        grove_version,
+        1,
+        None,
+    )
 }

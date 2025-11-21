@@ -133,11 +133,17 @@ let proof = self.merk.prove_position(actual_tree_position as u64, &self.grove_ve
 
 **For deletions:**
 ```rust
-// In-place tombstone update (no structural changes!)
 let op = ListOp::UpdateValueByKey {
     key: uuid.clone(),
-    value: encode_value(value, true),  // Mark as deleted
+    value: encode_value(value, true),
 };
+self.merk
+    .apply_list_batch(&[op], &self.grove_version)?;
+
+// Cache/bookkeeping
+self.characters[tree_position].deleted = true;
+let actual_tree_position = self.find_actual_tree_position(&uuid)?;
+let proof = self.merk.prove_position(actual_tree_position as u64, &self.grove_version)?;
 ```
 
 ### What Makes This Work
@@ -185,15 +191,17 @@ ListOp::UpdateValueByKey {
 
 ## Recommendation
 
-✅ **Current pure reference-based implementation is production-ready!**
+✅ **Reference-based inserts and deletions are production-ready.**
 
 **Pros:**
-- Protocol is reference-based (Matt Weidner's design benefits)
-- Implementation is reference-based (no position conversion)
-- Deletions use UpdateValueByKey (no tree restructuring)
-- Zero-latency typing works perfectly
-- Auditor can verify all operations
-- All tests passing
+- Protocol is reference-based for every mutating operation (Matt Weidner parity)
+- Server calls `InsertAfterKeyWithKey`/`UpdateValueByKey` directly (no positional conversion)
+- Zero-latency typing works: clients generate UUIDs locally and see immediate updates
+- Auditor can verify all operations with positional proofs
+- Integration tests covering the full flow pass
+
+**Caveats:**
+- Browsers trust the server; proof verification happens in the auditor, not in the UI yet
 
 **Performance considerations:**
 - Position discovery is O(n) scan (acceptable for demo scale)
@@ -226,7 +234,7 @@ ops_bob = [
 // Both operations reference uuid_h unambiguously!
 ```
 
-With current position-based:
+For comparison, a purely position-based approach looks like this:
 ```rust
 // Alice types "Hi" offline - positions 0, 1
 ops_alice = [
@@ -249,7 +257,7 @@ ops_bob = [
 
 - `merk/src/merk/list_ops.rs` - ListOp enum definition
 - `merk/examples/uuid-collab-edit-with-proofs.rs` - Shows `InsertAfterKey` usage
-- `merk-collab-demo/server/src/document.rs` - Current position-based implementation
+- `merk-collab-demo/server/src/document.rs` - Reference-based document implementation
 - `TOMBSTONES.md` - Explains deletion strategy
 
 ## References

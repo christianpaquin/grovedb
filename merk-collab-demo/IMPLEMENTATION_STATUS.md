@@ -1,8 +1,8 @@
-# Implementation Status: InsertAfterKeyWithKey
+# Implementation Status: Reference-Based List Ops
 
 ## Summary
 
-We have successfully implemented `InsertAfterKeyWithKey` - a reference-based operation that enables client-controlled UUIDs for optimistic updates in collaborative text editing, as described in Matt Weidner's "Text Without CRDTs" design.
+We have successfully implemented `InsertAfterKeyWithKey` and wired the server through `UpdateValueByKey`, giving us pure reference-based inserts and deletions with client-controlled UUIDs (Matt Weidner's "Text Without CRDTs" design).
 
 ## What Was Implemented
 
@@ -116,48 +116,14 @@ ListOp::InsertAfterKeyWithKey {
 
 ## What's Still TODO
 
-### 1. Update merk-collab-demo Server
-**File:** `merk-collab-demo/server/src/document.rs`
+### 1. Client-Side Proof Verification
+Browsers currently trust the server. To reach the “Text Without CRDTs” trust model we still need a WASM-friendly verifier (or a pure TypeScript implementation) plus signature verification for user identities.
 
-Currently uses:
-```rust
-ListOp::InsertAtPositionWithKey { position, key, value }
-```
+### 2. Storage/Persistence
+TempStorage makes demo restarts destructive. Re-introducing RocksDB (perhaps via `tokio::spawn_blocking`) would let us demonstrate crash recovery alongside the new reference-based ops.
 
-Should use:
-```rust
-ListOp::InsertAfterKeyWithKey { target_key, key, value }
-```
-
-### 2. Update Client to Generate UUIDs
-**File:** `merk-collab-demo/client/src/document.ts`
-
-Need to:
-- Import UUID library: `npm install uuid`
-- Generate UUIDs locally before operations
-- Track UUID of previous character for `InsertAfterKeyWithKey`
-- Remove position translation logic (no longer needed)
-
-### 3. Remove Position Translation
-**File:** `merk-collab-demo/server/src/document.rs`
-
-Can remove:
-- `visible_to_tree_position()` function
-- `tree_to_visible_position()` function
-- Position counting logic
-
-### 4. Update Auditor for Reference-Based Ops
-**File:** `merk-collab-demo/auditor/src/main.rs`
-
-Currently expects:
-```rust
-InsertAtPositionWithKey { position, key, value }
-```
-
-Should handle:
-```rust
-InsertAfterKeyWithKey { target_key, key, value }
-```
+### 3. Stress & Fuzz Testing
+Now that inserts and deletions are both UUID-driven, we should fuzz long-running collaborative traces (simulated network partitions, interleaved deletes/inserts) to prove the `get_key_position` cache and proof flow stay sound.
 
 ## Benefits of This Implementation
 
@@ -183,16 +149,14 @@ InsertAfterKeyWithKey { target_key, key, value }
 
 ## Testing
 
-All tests pass:
+All relevant list-mode tests pass locally:
 ```bash
-cargo test --features list_mode list_ops
-# Result: ok. 12 passed; 0 failed; 1 ignored
+cargo test -p grovedb-merk --features full,list_mode -- list_ops::tests
 ```
 
-Specific test for new operation:
+Focused coverage for the new operation:
 ```bash
-cargo test --features list_mode test_apply_list_batch_insert_after_key_with_key
-# Result: ok. 1 passed; 0 failed
+cargo test -p grovedb-merk --features full,list_mode test_apply_list_batch_insert_after_key_with_key
 ```
 
 ## Performance Optimizations (✅ IMPLEMENTED)
@@ -219,14 +183,14 @@ See `merk/src/merk/list_ops.rs` for implementation details.
 
 ## Next Steps (Optional Enhancements)
 
-1. **Make InsertAfterKeyWithKey more robust:**
-   - Handle structural changes from tombstone operations
-   - Alternative tree traversal methods
-   - Currently works but can fail after delete+reinsert
+1. **Fuzz InsertAfterKeyWithKey + UpdateValueByKey:**
+   - Long sequences of interleaved inserts/deletes
+   - Parent-pointer cache invalidation scenarios
+   - Simulated concurrent edits arriving out of order
 
-2. **Additional operations:**
-   - `UpdateValueByKey` for more efficient tombstone updates
-   - Currently uses batch: [DeleteAtPosition, InsertAtPositionWithKey]
+2. **Batch enhancements:**
+   - Multi-character (paste) batches using reference-based ops
+   - Range deletes implemented as UpdateValueByKey sweeps
 
 3. **End-to-end testing:**
    - Multi-client stress testing

@@ -59,6 +59,7 @@ grovedbg = ["full"]
 # "ordered_list_keys" is an extension gating key-rank APIs; currently placeholders.
 list_mode = ["minimal", "uuid"]
 ordered_list_keys = ["list_mode"]
+fuzz_tests_disabled = []
 
 [dev-dependencies]
 tempfile = "3.10.1"

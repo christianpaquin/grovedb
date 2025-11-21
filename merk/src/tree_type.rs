@@ -18,7 +18,7 @@ pub enum TreeType {
     CountTree = 3,
     CountSumTree = 4,
     #[cfg(feature = "list_mode")]
-    ListTree = 5,  // For collaborative editing with positional operations
+    ListTree = 5, // For collaborative editing with positional operations
 }
 
 impl TryFrom<u8> for TreeType {
@@ -78,7 +78,7 @@ impl TreeType {
             TreeType::CountTree => NodeType::CountNode,
             TreeType::CountSumTree => NodeType::CountSumNode,
             #[cfg(feature = "list_mode")]
-            TreeType::ListTree => NodeType::NormalNode,  // List trees use normal nodes with list_mode flag
+            TreeType::ListTree => NodeType::NormalNode, // List trees use normal nodes with list_mode flag
         }
     }
 

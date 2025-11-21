@@ -28,7 +28,10 @@ mod tree_feature_type;
 mod walk;
 
 #[cfg(feature = "minimal")]
-use std::cmp::{max, Ordering};
+use std::cmp::max;
+
+#[cfg(any(feature = "minimal", feature = "list_mode"))]
+use std::cmp::Ordering;
 
 #[cfg(feature = "minimal")]
 pub use commit::{Commit, NoopCommit};
@@ -48,8 +51,8 @@ use grovedb_costs::{
 use grovedb_version::version::GroveVersion;
 #[cfg(any(feature = "minimal", feature = "verify"))]
 pub use hash::{
-    combine_hash, kv_digest_to_kv_hash, kv_hash, node_hash, node_hash_list_mode, value_hash, CryptoHash, HASH_LENGTH,
-    NULL_HASH,
+    combine_hash, kv_digest_to_kv_hash, kv_hash, node_hash, node_hash_list_mode, value_hash,
+    CryptoHash, HASH_LENGTH, NULL_HASH,
 };
 #[cfg(feature = "minimal")]
 pub use hash::{HASH_BLOCK_SIZE, HASH_BLOCK_SIZE_U32, HASH_LENGTH_U32, HASH_LENGTH_U32_X2};
@@ -204,14 +207,22 @@ impl TreeNode {
     // ===== List mode operations =====
     #[cfg(feature = "list_mode")]
     #[inline]
-    pub fn is_list_mode(&self) -> bool { self.list_mode }
+    pub fn is_list_mode(&self) -> bool {
+        self.list_mode
+    }
 
     #[cfg(feature = "list_mode")]
     #[inline]
-    pub fn subtree_size(&self) -> u64 { if self.list_mode { self.subtree_size } else { 0 } }
+    pub fn subtree_size(&self) -> u64 {
+        if self.list_mode {
+            self.subtree_size
+        } else {
+            0
+        }
+    }
 
     #[cfg(feature = "list_mode")]
-    fn child_subtree_size(&self, left: bool) -> u64 {
+    pub(crate) fn child_subtree_size(&self, left: bool) -> u64 {
         self.child(left).map_or(0, |c| c.subtree_size())
     }
 
@@ -226,8 +237,12 @@ impl TreeNode {
 
     #[cfg(feature = "list_mode")]
     pub fn recompute_subtree_sizes_recursive(&mut self) {
-        if let Some(c) = self.child_mut(true) { c.recompute_subtree_sizes_recursive(); }
-        if let Some(c) = self.child_mut(false) { c.recompute_subtree_sizes_recursive(); }
+        if let Some(c) = self.child_mut(true) {
+            c.recompute_subtree_sizes_recursive();
+        }
+        if let Some(c) = self.child_mut(false) {
+            c.recompute_subtree_sizes_recursive();
+        }
         self.recompute_subtree_size();
     }
 
@@ -235,10 +250,16 @@ impl TreeNode {
     /// Convert an existing (non-list) subtree to list mode recursively.
     /// Safe to call multiple times; idempotent.
     pub fn convert_subtree_to_list_mode(&mut self) {
-        if self.list_mode { return; }
+        if self.list_mode {
+            return;
+        }
         self.list_mode = true;
-        if let Some(c) = self.child_mut(true) { c.convert_subtree_to_list_mode(); }
-        if let Some(c) = self.child_mut(false) { c.convert_subtree_to_list_mode(); }
+        if let Some(c) = self.child_mut(true) {
+            c.convert_subtree_to_list_mode();
+        }
+        if let Some(c) = self.child_mut(false) {
+            c.convert_subtree_to_list_mode();
+        }
         self.recompute_subtree_size();
     }
 
@@ -309,12 +330,16 @@ impl TreeNode {
         self.use_parent_pointers = false;
         self.parent_key = None;
         self.child_side = None;
-        
+
         // Recursively disable for children (handle all Link types that have trees in memory)
         // We need to handle Uncommitted and Loaded links specially because they have cached hashes
         // that were computed with parent pointers enabled
         match self.inner.left.take() {
-            Some(Link::Modified { tree: mut child_tree, pending_writes, child_heights }) => {
+            Some(Link::Modified {
+                tree: mut child_tree,
+                pending_writes,
+                child_heights,
+            }) => {
                 child_tree.disable_parent_pointers_recursive();
                 self.inner.left = Some(Link::Modified {
                     tree: child_tree,
@@ -322,7 +347,11 @@ impl TreeNode {
                     child_heights,
                 });
             }
-            Some(Link::Uncommitted { mut tree, child_heights, .. }) => {
+            Some(Link::Uncommitted {
+                mut tree,
+                child_heights,
+                ..
+            }) => {
                 tree.disable_parent_pointers_recursive();
                 // Convert Uncommitted to Modified since hash needs recomputation
                 self.inner.left = Some(Link::Modified {
@@ -331,7 +360,11 @@ impl TreeNode {
                     tree,
                 });
             }
-            Some(Link::Loaded { mut tree, child_heights, .. }) => {
+            Some(Link::Loaded {
+                mut tree,
+                child_heights,
+                ..
+            }) => {
                 tree.disable_parent_pointers_recursive();
                 // Convert Loaded to Modified since hash needs recomputation
                 self.inner.left = Some(Link::Modified {
@@ -342,9 +375,13 @@ impl TreeNode {
             }
             other => self.inner.left = other, // Reference or None - no action needed
         }
-        
+
         match self.inner.right.take() {
-            Some(Link::Modified { tree: mut child_tree, pending_writes, child_heights }) => {
+            Some(Link::Modified {
+                tree: mut child_tree,
+                pending_writes,
+                child_heights,
+            }) => {
                 child_tree.disable_parent_pointers_recursive();
                 self.inner.right = Some(Link::Modified {
                     tree: child_tree,
@@ -352,7 +389,11 @@ impl TreeNode {
                     child_heights,
                 });
             }
-            Some(Link::Uncommitted { mut tree, child_heights, .. }) => {
+            Some(Link::Uncommitted {
+                mut tree,
+                child_heights,
+                ..
+            }) => {
                 tree.disable_parent_pointers_recursive();
                 // Convert Uncommitted to Modified since hash needs recomputation
                 self.inner.right = Some(Link::Modified {
@@ -361,7 +402,11 @@ impl TreeNode {
                     tree,
                 });
             }
-            Some(Link::Loaded { mut tree, child_heights, .. }) => {
+            Some(Link::Loaded {
+                mut tree,
+                child_heights,
+                ..
+            }) => {
                 tree.disable_parent_pointers_recursive();
                 // Convert Loaded to Modified since hash needs recomputation
                 self.inner.right = Some(Link::Modified {
@@ -379,7 +424,7 @@ impl TreeNode {
     /// This is used for GroveDB nested trees where parent pointers are needed for position computation.
     pub fn enable_parent_pointers_recursive(&mut self) {
         self.use_parent_pointers = true;
-        
+
         // Recursively enable for children (but don't set parent_key yet - that happens during attach)
         match &mut self.inner.left {
             Some(Link::Modified { tree, .. }) => {
@@ -409,14 +454,19 @@ impl TreeNode {
     where
         F: FnMut(&[u8]) -> Option<Self>,
     {
-        if !self.list_mode { return None; }
+        if !self.list_mode {
+            return None;
+        }
         let mut pos = self.child_subtree_size(true); // nodes before self in own subtree
         let mut side_opt = self.child_side;
         let mut parent_key_opt = self.parent_key.clone();
         while let (Some(parent_key), Some(side)) = (parent_key_opt.as_ref(), side_opt) {
             let parent = fetch(parent_key.as_slice())?; // abort if parent not found
-            if !parent.list_mode { return None; }
-            if !side { // we are right child
+            if !parent.list_mode {
+                return None;
+            }
+            if !side {
+                // we are right child
                 pos += 1; // count parent
                 pos += parent.child_subtree_size(true); // all nodes in left subtree of parent
             }
@@ -431,7 +481,9 @@ impl TreeNode {
     /// This version doesn't climb the parent chain - assumes parent pointers are ephemeral.
     /// For persistent parent climbing, use compute_position_with_parent_fetch.
     pub fn compute_position(&self) -> Option<u64> {
-        if !self.list_mode { return None; }
+        if !self.list_mode {
+            return None;
+        }
         // For now just return left subtree size (position within current subtree)
         // Full position requires parent chain which needs storage access
         Some(self.child_subtree_size(true))
@@ -443,9 +495,11 @@ impl TreeNode {
     /// Returns a mutable reference to the node and the path taken (for updating ancestors).
     /// This is a helper for insert_at and other positional operations.
     fn find_node_at_position_mut(&mut self, target_pos: u64) -> Option<&mut Self> {
-        if !self.list_mode { return None; }
+        if !self.list_mode {
+            return None;
+        }
         let left_size = self.child_subtree_size(true);
-        
+
         if target_pos < left_size {
             // Target is in left subtree
             if let Some(left_child) = self.child_mut(true) {
@@ -456,7 +510,7 @@ impl TreeNode {
             // This is the target node
             Some(self)
         } else {
-            // Target is in right subtree  
+            // Target is in right subtree
             // Adjust position: subtract left_size + 1 (current node)
             let right_pos = target_pos - left_size - 1;
             if let Some(right_child) = self.child_mut(false) {
@@ -470,20 +524,24 @@ impl TreeNode {
     /// Insert a new node at the given 0-based position.
     /// This is a simplified in-memory version that doesn't handle persistence or balancing.
     /// Returns the inserted node's key on success.
-    /// 
+    ///
     /// Algorithm:
     /// 1. Traverse to insertion point using subtree_size
     /// 2. Create new leaf with random UUID key
     /// 3. Attach at appropriate position
     /// 4. Update subtree_sizes upward (requires parent chain or re-traversal)
-    /// 
+    ///
     /// Note: For a full persistence-aware implementation, this would need:
     /// - Storage context for writing updated nodes
     /// - Parent chain updates for all ancestors
     /// - Optional balancing
     ///
     /// For collaborative scenarios where clients need to pick UUIDs locally, use `insert_at_position_with_key`.
-    pub fn insert_at_position(self, position: u64, value: Vec<u8>) -> CostContext<Result<(Self, Vec<u8>), Error>> {
+    pub fn insert_at_position(
+        self,
+        position: u64,
+        value: Vec<u8>,
+    ) -> CostContext<Result<(Self, Vec<u8>), Error>> {
         use uuid::Uuid;
         let key = Uuid::new_v4().as_bytes().to_vec();
         self.insert_at_position_with_key(position, key, value)
@@ -522,10 +580,12 @@ impl TreeNode {
         value: Vec<u8>,
     ) -> CostContext<Result<(Self, Vec<u8>), Error>> {
         if !self.list_mode {
-            return Err(Error::InternalError("insert_at_position_with_key requires list_mode"))
-                .wrap_with_cost(OperationCost::default());
+            return Err(Error::InternalError(
+                "insert_at_position_with_key requires list_mode",
+            ))
+            .wrap_with_cost(OperationCost::default());
         }
-        
+
         let total_size = self.subtree_size();
         if position > total_size {
             return Err(Error::InternalError("insert position exceeds tree size"))
@@ -543,7 +603,7 @@ impl TreeNode {
         // Recursive insertion helper that balances on the way back up
         fn insert_recursive(node: TreeNode, position: u64, new_node: TreeNode) -> TreeNode {
             let left_size = node.child_subtree_size(true);
-            
+
             if position <= left_size {
                 let (node, maybe_left) = node.detach(true);
                 let new_left = if let Some(left_child) = maybe_left {
@@ -552,7 +612,7 @@ impl TreeNode {
                     new_node
                 };
                 let node = node.attach(true, Some(new_left));
-                node.balance()  // Balance after attaching
+                node.balance() // Balance after attaching
             } else {
                 let right_pos = position - left_size - 1;
                 let (node, maybe_right) = node.detach(false);
@@ -562,12 +622,11 @@ impl TreeNode {
                     new_node
                 };
                 let node = node.attach(false, Some(new_right));
-                node.balance()  // Balance after attaching
+                node.balance() // Balance after attaching
             }
         }
 
-        let mut result_tree = insert_recursive(self, position, new_node);
-        result_tree.recompute_subtree_sizes_recursive();
+        let result_tree = insert_recursive(self, position, new_node);
         Ok((result_tree, key)).wrap_with_cost(OperationCost::default())
     }
 
@@ -584,12 +643,17 @@ impl TreeNode {
     /// - Recursively descend using subtree_size to find the target node
     /// - When found, detach it and merge its children
     /// - Update subtree sizes on the way back up
-    pub fn delete_at_position(self, position: u64) -> CostContext<Result<(Self, Vec<u8>, Vec<u8>), Error>> {
+    pub fn delete_at_position(
+        self,
+        position: u64,
+    ) -> CostContext<Result<(Self, Vec<u8>, Vec<u8>), Error>> {
         if !self.list_mode {
-            return Err(Error::InternalError("delete_at_position requires list_mode"))
-                .wrap_with_cost(OperationCost::default());
+            return Err(Error::InternalError(
+                "delete_at_position requires list_mode",
+            ))
+            .wrap_with_cost(OperationCost::default());
         }
-        
+
         let total_size = self.subtree_size();
         if position >= total_size {
             return Err(Error::InternalError("delete position out of bounds"))
@@ -599,7 +663,7 @@ impl TreeNode {
         // Recursive deletion helper that balances on the way back up
         fn delete_recursive(node: TreeNode, position: u64) -> (Option<TreeNode>, Vec<u8>, Vec<u8>) {
             let left_size = node.child_subtree_size(true);
-            
+
             if position < left_size {
                 // Delete from left subtree
                 let (node, maybe_left) = node.detach(true);
@@ -607,8 +671,12 @@ impl TreeNode {
                     let (new_left, key, value) = delete_recursive(left_child, position);
                     let updated = if let Some(left) = new_left {
                         let node = node.attach(true, Some(left));
-                        node.balance()  // Balance after deletion
+                        node.balance() // Balance after deletion
                     } else {
+                        let mut node = node;
+                        if node.list_mode {
+                            node.recompute_subtree_size();
+                        }
                         node
                     };
                     (Some(updated), key, value)
@@ -619,11 +687,11 @@ impl TreeNode {
                 // This is the node to delete
                 let key = node.key().to_vec();
                 let value = node.inner.kv.value_as_slice().to_vec();
-                
+
                 // Detach both children
                 let (node, maybe_left) = node.detach(true);
                 let (_node, maybe_right) = node.detach(false);
-                
+
                 // Merge children: if both exist, attach left as the new subtree
                 // and re-attach right to the rightmost node of left
                 match (maybe_left, maybe_right) {
@@ -637,7 +705,7 @@ impl TreeNode {
                             if let Some(right_child) = maybe_right {
                                 let updated_right = attach_rightmost(right_child, to_attach);
                                 let node = node.attach(false, Some(updated_right));
-                                node.balance()  // Balance after reattaching
+                                node.balance() // Balance after reattaching
                             } else {
                                 node.attach(false, Some(to_attach))
                             }
@@ -654,8 +722,12 @@ impl TreeNode {
                     let (new_right, key, value) = delete_recursive(right_child, right_pos);
                     let updated = if let Some(right) = new_right {
                         let node = node.attach(false, Some(right));
-                        node.balance()  // Balance after deletion
+                        node.balance() // Balance after deletion
                     } else {
+                        let mut node = node;
+                        if node.list_mode {
+                            node.recompute_subtree_size();
+                        }
                         node
                     };
                     (Some(updated), key, value)
@@ -666,8 +738,7 @@ impl TreeNode {
         }
 
         let (maybe_tree, key, value) = delete_recursive(self, position);
-        if let Some(mut tree) = maybe_tree {
-            tree.recompute_subtree_sizes_recursive();
+        if let Some(tree) = maybe_tree {
             Ok((tree, key, value)).wrap_with_cost(OperationCost::default())
         } else {
             // Tree became empty
@@ -693,34 +764,20 @@ impl TreeNode {
     /// 3. Insert new value at position + 1 using insert_at_position
     ///
     /// Returns the updated tree and the new node's UUID key.
-    pub fn insert_after_key<F>(
+    pub fn insert_after_key(
         self,
         target_key: &[u8],
         value: Vec<u8>,
-        mut fetch: F,
-    ) -> CostContext<Result<(Self, Vec<u8>), Error>>
-    where
-        F: FnMut(&[u8]) -> Option<Self>,
-    {
+    ) -> CostContext<Result<(Self, Vec<u8>), Error>> {
         if !self.list_mode {
             return Err(Error::InternalError("insert_after_key requires list_mode"))
                 .wrap_with_cost(OperationCost::default());
         }
 
-        // Fetch the target node
-        let target_node = match fetch(target_key) {
-            Some(node) => node,
-            None => {
-                return Err(Error::InternalError("target key not found in tree"))
-                    .wrap_with_cost(OperationCost::default());
-            }
-        };
-
-        // Compute its position
-        let position = match target_node.compute_position_with_parent_fetch(fetch) {
+        let position = match self.position_of_key(target_key) {
             Some(pos) => pos,
             None => {
-                return Err(Error::InternalError("could not compute position for target key"))
+                return Err(Error::InternalError("target key not found in tree"))
                     .wrap_with_cost(OperationCost::default());
             }
         };
@@ -739,49 +796,62 @@ impl TreeNode {
     /// Requirements:
     /// - Tree must be in list_mode
     /// - target_key must exist in the tree
-    /// - fetch must be able to retrieve nodes by key
     ///
     /// Algorithm:
-    /// 1. Find the node with target_key using fetch
-    /// 2. Compute its position using compute_position_with_parent_fetch
+    /// 1. Traverse the tree to find the node with `target_key`
+    /// 2. Use subtree sizes to determine its in-order position
     /// 3. Insert new value at position + 1 using insert_at_position_with_key
     ///
     /// Returns the updated tree and the client-provided key (for consistency with other insert methods).
-    pub fn insert_after_key_with_key<F>(
+    pub fn insert_after_key_with_key(
         self,
         target_key: &[u8],
         key: Vec<u8>,
         value: Vec<u8>,
-        mut fetch: F,
-    ) -> CostContext<Result<(Self, Vec<u8>), Error>>
-    where
-        F: FnMut(&[u8]) -> Option<Self>,
-    {
+    ) -> CostContext<Result<(Self, Vec<u8>), Error>> {
         if !self.list_mode {
-            return Err(Error::InternalError("insert_after_key_with_key requires list_mode"))
-                .wrap_with_cost(OperationCost::default());
+            return Err(Error::InternalError(
+                "insert_after_key_with_key requires list_mode",
+            ))
+            .wrap_with_cost(OperationCost::default());
         }
 
-        // Fetch the target node
-        let target_node = match fetch(target_key) {
-            Some(node) => node,
+        let position = match self.position_of_key(target_key) {
+            Some(pos) => pos,
             None => {
                 return Err(Error::InternalError("target key not found in tree"))
                     .wrap_with_cost(OperationCost::default());
             }
         };
 
-        // Compute its position
-        let position = match target_node.compute_position_with_parent_fetch(fetch) {
-            Some(pos) => pos,
-            None => {
-                return Err(Error::InternalError("could not compute position for target key"))
-                    .wrap_with_cost(OperationCost::default());
-            }
-        };
-
         // Insert at position + 1 (after the target) with client-provided key
         self.insert_at_position_with_key(position + 1, key, value)
+    }
+
+    #[cfg(feature = "list_mode")]
+    pub(crate) fn position_of_key(&self, target_key: &[u8]) -> Option<u64> {
+        fn helper(node: &TreeNode, target_key: &[u8], base_offset: u64) -> Option<u64> {
+            let left_size = node.child_subtree_size(true);
+
+            if node.key() == target_key {
+                return Some(base_offset + left_size);
+            }
+
+            if let Some(left) = node.child(true) {
+                if let Some(pos) = helper(left, target_key, base_offset) {
+                    return Some(pos);
+                }
+            }
+
+            if let Some(right) = node.child(false) {
+                let next_offset = base_offset + left_size + 1;
+                return helper(right, target_key, next_offset);
+            }
+
+            None
+        }
+
+        helper(self, target_key, 0)
     }
 
     #[cfg(feature = "list_mode")]
@@ -806,29 +876,40 @@ impl TreeNode {
     /// - Enables reliable InsertAfterKeyWithKey after updates
     ///
     /// Returns the updated tree and the key.
-    pub fn update_value_by_key<F>(
+    pub fn update_value_by_key(
         self,
         key: &[u8],
         value: Vec<u8>,
-        mut _fetch: F,
-    ) -> CostContext<Result<(Self, Vec<u8>), Error>>
-    where
-        F: FnMut(&[u8]) -> Option<Self>,
-    {
+    ) -> CostContext<Result<(Self, Vec<u8>), Error>> {
         if !self.list_mode {
-            return Err(Error::InternalError("update_value_by_key requires list_mode"))
-                .wrap_with_cost(OperationCost::default());
+            return Err(Error::InternalError(
+                "update_value_by_key requires list_mode",
+            ))
+            .wrap_with_cost(OperationCost::default());
         }
 
         // Recursive helper to find and update the node
-        fn update_recursive(node: TreeNode, key: &[u8], value: Vec<u8>) -> (Option<TreeNode>, bool) {
+        fn update_recursive(
+            node: TreeNode,
+            key: &[u8],
+            value: Vec<u8>,
+        ) -> (Option<TreeNode>, bool) {
             // Check if this is the node to update
             if node.key() == key {
-                // Create updated node with new value
+                // Create updated node with new value and recompute hashes
                 let mut updated = node;
-                updated.inner.kv.value = value;
+
+                // CRITICAL: Recompute value_hash and kv.hash when value changes
+                // Without this, the Merkle proof will have incorrect root hash!
+                // Use the public API that handles hash recomputation
+                updated.inner.kv = updated
+                    .inner
+                    .kv
+                    .put_value_then_update(value.to_vec())
+                    .unwrap();
+
                 // Subtree size unchanged (in-place update)
-                return (Some(updated), true);  // true = found and updated
+                return (Some(updated), true); // true = found and updated
             }
 
             // Search left subtree
@@ -842,7 +923,7 @@ impl TreeNode {
                 }
                 // Not found in left, restore left and continue
                 let temp_node = temp_node.attach(true, updated_left);
-                
+
                 // Search right subtree
                 let (temp_node, maybe_right) = temp_node.detach(false);
                 if let Some(right_child) = maybe_right {
@@ -878,10 +959,8 @@ impl TreeNode {
             Some(tree) if found => {
                 Ok((tree, key.to_vec())).wrap_with_cost(OperationCost::default())
             }
-            _ => {
-                Err(Error::InternalError("key not found in tree for update"))
-                    .wrap_with_cost(OperationCost::default())
-            }
+            _ => Err(Error::InternalError("key not found in tree for update"))
+                .wrap_with_cost(OperationCost::default()),
         }
     }
 
@@ -1324,7 +1403,7 @@ impl TreeNode {
             } else {
                 &None
             };
-            
+
             return node_hash_list_mode(
                 self.inner.kv.hash(),
                 self.child_hash(true),
@@ -1461,16 +1540,16 @@ impl TreeNode {
         // Detach left child (x)
         let (y, maybe_x) = self.detach(true);
         let x = maybe_x.expect("rotate_right requires left child");
-        
+
         // Detach B from x
         let (x, maybe_b) = x.detach(false);
-        
+
         // Attach B to y's left
         let y = y.attach(true, maybe_b);
-        
+
         // Attach y to x's right
         let x = x.attach(false, Some(y));
-        
+
         x
     }
 
@@ -1499,16 +1578,16 @@ impl TreeNode {
         // Detach right child (y)
         let (x, maybe_y) = self.detach(false);
         let y = maybe_y.expect("rotate_left requires right child");
-        
+
         // Detach B from y
         let (y, maybe_b) = y.detach(true);
-        
+
         // Attach B to x's right
         let x = x.attach(false, maybe_b);
-        
+
         // Attach x to y's left
         let y = y.attach(true, Some(x));
-        
+
         y
     }
 
@@ -1525,8 +1604,7 @@ impl TreeNode {
         }
 
         let bf = self.balance_factor();
-        
-        if bf < -1 {
+        let mut balanced = if bf < -1 {
             // Left-heavy
             let left_bf = self.child(true).map_or(0, |c| c.balance_factor());
             if left_bf > 0 {
@@ -1557,7 +1635,13 @@ impl TreeNode {
         } else {
             // Already balanced
             self
+        };
+
+        if balanced.list_mode {
+            balanced.recompute_subtree_size();
         }
+
+        balanced
     }
 
     /// Attaches the child (if any) to the root node on the given side. Creates
@@ -1580,10 +1664,10 @@ impl TreeNode {
         //     println!("attaching nothing to {}", parent.unwrap());
         // }
 
-    // Capture parent key before mutable borrow to satisfy borrow checker when setting child pointer
-    #[cfg(feature = "list_mode")]
-    let parent_key_snapshot = self.key().to_vec();
-    let slot = self.slot_mut(left);
+        // Capture parent key before mutable borrow to satisfy borrow checker when setting child pointer
+        #[cfg(feature = "list_mode")]
+        let parent_key_snapshot = self.key().to_vec();
+        let slot = self.slot_mut(left);
 
         if slot.is_some() {
             panic!(
@@ -1591,16 +1675,18 @@ impl TreeNode {
                 side_to_str(left)
             );
         }
-    #[cfg(feature = "list_mode")]
-    let maybe_child = maybe_child.map(|mut child| { 
-        if child.use_parent_pointers {
-            child.set_parent_pointer(&parent_key_snapshot, left);
-        }
-        child 
-    });
+        #[cfg(feature = "list_mode")]
+        let maybe_child = maybe_child.map(|mut child| {
+            if child.use_parent_pointers {
+                child.set_parent_pointer(&parent_key_snapshot, left);
+            }
+            child
+        });
         *slot = Link::maybe_from_modified_tree(maybe_child);
-    #[cfg(feature = "list_mode")]
-    if self.list_mode { self.recompute_subtree_size(); }
+        #[cfg(feature = "list_mode")]
+        if self.list_mode {
+            self.recompute_subtree_size();
+        }
 
         self
     }
@@ -1629,7 +1715,9 @@ impl TreeNode {
             Some(Link::Loaded { tree, .. }) => Some(tree),
         };
         #[cfg(feature = "list_mode")]
-        if let Some(c) = maybe_child.as_mut() { c.clear_parent_pointer(); }
+        if let Some(c) = maybe_child.as_mut() {
+            c.clear_parent_pointer();
+        }
         // println!("detaching {}",
         // std::str::from_utf8(maybe_child.as_ref().unwrap().key()).unwrap());
 
@@ -2019,7 +2107,7 @@ impl TreeNode {
     {
         // TODO: return Err instead of panic?
         let link = self.link(left).expect("Expected link");
-        let (child_heights, hash, aggregate_data) = match link {
+        let (child_heights, _hash, aggregate_data) = match link {
             Link::Reference {
                 child_heights,
                 hash,
@@ -2035,9 +2123,20 @@ impl TreeNode {
             source.fetch(link, value_defined_cost_fn, grove_version)
         );
         debug_assert_eq!(tree.key(), link.key());
+
+        // CRITICAL FIX: Recompute the hash from the loaded tree instead of trusting
+        // the cached hash in the Reference link. The Reference link's hash might be
+        // stale if the node was modified and committed in a previous operation but
+        // the Reference link wasn't updated. This can happen when UpdateValueByKey
+        // modifies a node's value - sibling nodes aren't modified, so their parent
+        // still has the old Reference link with the old hash pointing to them.
+        // When we load from storage, we get the NEW committed data, but if we use
+        // the OLD hash from the Reference link, proofs will compute wrong root hashes.
+        let recomputed_hash = tree.hash().unwrap_add_cost(&mut cost);
+
         *self.slot_mut(left) = Some(Link::Loaded {
             tree,
-            hash: *hash,
+            hash: recomputed_hash, // Use freshly computed hash, not stale one
             child_heights: *child_heights,
             aggregate_data: *aggregate_data,
         });
@@ -2293,8 +2392,12 @@ mod test {
         // Walk to insert nodes (simple DFS) since we consumed nodes building root
         fn insert_nodes(node: &TreeNode, map: &mut HashMap<Vec<u8>, TreeNode>) {
             map.insert(node.key().to_vec(), node.clone());
-            if let Some(c) = node.child(true) { insert_nodes(c, map); }
-            if let Some(c) = node.child(false) { insert_nodes(c, map); }
+            if let Some(c) = node.child(true) {
+                insert_nodes(c, map);
+            }
+            if let Some(c) = node.child(false) {
+                insert_nodes(c, map);
+            }
         }
         insert_nodes(&root, &mut map);
 
@@ -2307,9 +2410,18 @@ mod test {
         let left_ref = mid_ref.child(true).unwrap();
 
         // In-order traversal positions should be: left_ref=0, mid_ref=1, root_ref=2
-        assert_eq!(left_ref.compute_position_with_parent_fetch(&mut fetch), Some(0));
-        assert_eq!(mid_ref.compute_position_with_parent_fetch(&mut fetch), Some(1));
-        assert_eq!(root_ref.compute_position_with_parent_fetch(&mut fetch), Some(2));
+        assert_eq!(
+            left_ref.compute_position_with_parent_fetch(&mut fetch),
+            Some(0)
+        );
+        assert_eq!(
+            mid_ref.compute_position_with_parent_fetch(&mut fetch),
+            Some(1)
+        );
+        assert_eq!(
+            root_ref.compute_position_with_parent_fetch(&mut fetch),
+            Some(2)
+        );
 
         // subtree sizes
         assert_eq!(root_ref.subtree_size(), 3);
@@ -2324,15 +2436,15 @@ mod test {
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
 
         // Insert at position 0 (before the first node)
-        let (new_tree, key_x) = tree.insert_at_position(0, vec![2]).unwrap().unwrap();
+        let (new_tree, _key_x) = tree.insert_at_position(0, vec![2]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Insert at position 2 (at the end)
-        let (new_tree, key_z) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
+        let (new_tree, _key_z) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Insert at position 2 (between position 1 and 2)
-        let (new_tree, key_y) = tree.insert_at_position(2, vec![4]).unwrap().unwrap();
+        let (new_tree, _key_y) = tree.insert_at_position(2, vec![4]).unwrap().unwrap();
         tree = new_tree;
 
         // Verify the in-order traversal gives us: value 2, value 1, value 4, value 3
@@ -2347,7 +2459,7 @@ mod test {
             }
         }
         collect_values(&tree, &mut values);
-        
+
         assert_eq!(values, vec![vec![2], vec![1], vec![4], vec![3]]);
         assert_eq!(tree.subtree_size(), 4);
     }
@@ -2357,7 +2469,7 @@ mod test {
     fn test_delete_at_position() {
         // Test deleting nodes at specific positions in a list_mode tree
         // Build tree with values: [2, 1, 4, 3] at positions 0, 1, 2, 3
-        let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
+        let tree = TreeNode::new_list_node(vec![1]).unwrap();
         let (tree, _) = tree.insert_at_position(0, vec![2]).unwrap().unwrap();
         let (tree, _) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
         let (mut tree, _) = tree.insert_at_position(2, vec![4]).unwrap().unwrap();
@@ -2366,7 +2478,7 @@ mod test {
         assert_eq!(tree.subtree_size(), 4);
 
         // Delete at position 2 (value 4)
-        let (new_tree, key, value) = tree.delete_at_position(2).unwrap().unwrap();
+        let (new_tree, _key, value) = tree.delete_at_position(2).unwrap().unwrap();
         tree = new_tree;
         assert_eq!(value, vec![4]);
         assert_eq!(tree.subtree_size(), 3);
@@ -2411,8 +2523,6 @@ mod test {
     #[test]
     #[cfg(feature = "list_mode")]
     fn test_insert_after_key() {
-        use std::collections::HashMap;
-
         // Build a tree with 3 nodes: [a, b, c]
         let n1 = TreeNode::new_list_node(vec![b'a']).unwrap();
         let key_a = n1.key().to_vec();
@@ -2423,25 +2533,9 @@ mod test {
         // Build tree: n3(root) -> left n2 -> left n1
         let root = n3.attach(true, Some(n2.attach(true, Some(n1))));
 
-        // Collect nodes in a map for fetch closure
-        let mut map: HashMap<Vec<u8>, TreeNode> = HashMap::new();
-        fn collect_nodes(node: &TreeNode, map: &mut HashMap<Vec<u8>, TreeNode>) {
-            map.insert(node.key().to_vec(), node.clone());
-            if let Some(left) = node.child(true) {
-                collect_nodes(left, map);
-            }
-            if let Some(right) = node.child(false) {
-                collect_nodes(right, map);
-            }
-        }
-        collect_nodes(&root, &mut map);
-
         // Insert 'x' after node with key_b (which is at position 1)
         // Expected result: [a, b, x, c] at positions 0, 1, 2, 3
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (tree, key_x) = root.insert_after_key(&key_b, vec![b'x'], fetch)
-            .unwrap()
-            .unwrap();
+        let (mut tree, _key_x) = root.insert_after_key(&key_b, vec![b'x']).unwrap().unwrap();
 
         // Verify in-order traversal: [a, b, x, c]
         let mut values = Vec::new();
@@ -2459,26 +2553,22 @@ mod test {
         assert_eq!(tree.subtree_size(), 4);
 
         // Now insert 'y' after 'a' (position 0)
-        // Update map with new tree
-        map.clear();
-        collect_nodes(&tree, &mut map);
-        let fetch2 = |k: &[u8]| map.get(k).cloned();
-        let (tree, key_y) = tree.insert_after_key(&key_a, vec![b'y'], fetch2)
-            .unwrap()
-            .unwrap();
+        let (new_tree, _key_y) = tree.insert_after_key(&key_a, vec![b'y']).unwrap().unwrap();
+        tree = new_tree;
 
         // Verify in-order traversal: [a, y, b, x, c]
         values.clear();
         collect_values(&tree, &mut values);
-        assert_eq!(values, vec![vec![b'a'], vec![b'y'], vec![b'b'], vec![b'x'], vec![b'c']]);
+        assert_eq!(
+            values,
+            vec![vec![b'a'], vec![b'y'], vec![b'b'], vec![b'x'], vec![b'c']]
+        );
         assert_eq!(tree.subtree_size(), 5);
     }
 
     #[test]
     #[cfg(feature = "list_mode")]
     fn test_collaborative_document_editing_simulation() {
-        use std::collections::HashMap;
-
         // Simulate a collaborative document editing scenario using the "Text Without CRDTs" approach
         // from https://mattweidner.com/2025/05/21/text-without-crdts.html
         //
@@ -2493,7 +2583,7 @@ mod test {
 
         // Start with empty document (single node as placeholder, or we could start truly empty)
         let mut doc = TreeNode::new_list_node(vec![b'H']).unwrap();
-        let key_h = doc.key().to_vec();
+        let _key_h = doc.key().to_vec();
         println!("Initial: H");
 
         // User A: Insert 'e' after 'H'
@@ -2502,42 +2592,22 @@ mod test {
         println!("After insert 'e' at position 1: He");
 
         // User A: Insert 'l' after 'e'
-        let mut map: HashMap<Vec<u8>, TreeNode> = HashMap::new();
-        fn update_map(tree: &TreeNode, map: &mut HashMap<Vec<u8>, TreeNode>) {
-            map.clear();
-            fn collect(node: &TreeNode, map: &mut HashMap<Vec<u8>, TreeNode>) {
-                map.insert(node.key().to_vec(), node.clone());
-                if let Some(left) = node.child(true) {
-                    collect(left, map);
-                }
-                if let Some(right) = node.child(false) {
-                    collect(right, map);
-                }
-            }
-            collect(tree, map);
-        }
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_l1) = doc.insert_after_key(&key_e, vec![b'l'], fetch).unwrap().unwrap();
+        let (new_doc, key_l1) = doc.insert_after_key(&key_e, vec![b'l']).unwrap().unwrap();
         doc = new_doc;
         println!("After insert 'l' after 'e': Hel");
 
         // User A: Insert another 'l' after first 'l'
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_l2) = doc.insert_after_key(&key_l1, vec![b'l'], fetch).unwrap().unwrap();
+        let (new_doc, key_l2) = doc.insert_after_key(&key_l1, vec![b'l']).unwrap().unwrap();
         doc = new_doc;
         println!("After insert 'l' after 'l': Hell");
 
         // User A: Insert 'o' after second 'l'
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_o1) = doc.insert_after_key(&key_l2, vec![b'o'], fetch).unwrap().unwrap();
+        let (new_doc, key_o1) = doc.insert_after_key(&key_l2, vec![b'o']).unwrap().unwrap();
         doc = new_doc;
         println!("After insert 'o' after 'l': Hello");
 
         // User B: Concurrently inserts ' ' (space) at the end
-        let (new_doc, key_space) = doc.insert_at_position(5, vec![b' ']).unwrap().unwrap();
+        let (new_doc, _key_space) = doc.insert_at_position(5, vec![b' ']).unwrap().unwrap();
         doc = new_doc;
         println!("After insert ' ' at position 5: Hello ");
 
@@ -2547,46 +2617,35 @@ mod test {
         println!("After insert 'W' at position 6: Hello W");
 
         // User B: Continue typing "orld"
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_o2) = doc.insert_after_key(&key_w, vec![b'o'], fetch).unwrap().unwrap();
+        let (new_doc, key_o2) = doc.insert_after_key(&key_w, vec![b'o']).unwrap().unwrap();
         doc = new_doc;
 
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_r) = doc.insert_after_key(&key_o2, vec![b'r'], fetch).unwrap().unwrap();
+        let (new_doc, key_r) = doc.insert_after_key(&key_o2, vec![b'r']).unwrap().unwrap();
         doc = new_doc;
 
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_l3) = doc.insert_after_key(&key_r, vec![b'l'], fetch).unwrap().unwrap();
+        let (new_doc, key_l3) = doc.insert_after_key(&key_r, vec![b'l']).unwrap().unwrap();
         doc = new_doc;
 
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_d) = doc.insert_after_key(&key_l3, vec![b'd'], fetch).unwrap().unwrap();
+        let (new_doc, _key_d) = doc.insert_after_key(&key_l3, vec![b'd']).unwrap().unwrap();
         doc = new_doc;
         println!("After User B types 'World': Hello World");
 
         // User A: Insert " Beautiful" between "Hello" and " World"
         // Insert space after 'o' in "Hello"
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_space2) = doc.insert_after_key(&key_o1, vec![b' '], fetch).unwrap().unwrap();
+        let (new_doc, key_space2) = doc.insert_after_key(&key_o1, vec![b' ']).unwrap().unwrap();
         doc = new_doc;
 
         // Insert "Beautiful"
-        update_map(&doc, &mut map);
-        let fetch = |k: &[u8]| map.get(k).cloned();
-        let (new_doc, key_b) = doc.insert_after_key(&key_space2, vec![b'B'], fetch).unwrap().unwrap();
+        let (new_doc, key_b) = doc
+            .insert_after_key(&key_space2, vec![b'B'])
+            .unwrap()
+            .unwrap();
         doc = new_doc;
 
         let chars = vec![b'e', b'a', b'u', b't', b'i', b'f', b'u', b'l'];
         let mut last_key = key_b;
         for ch in chars {
-            update_map(&doc, &mut map);
-            let fetch = |k: &[u8]| map.get(k).cloned();
-            let (new_doc, new_key) = doc.insert_after_key(&last_key, vec![ch], fetch).unwrap().unwrap();
+            let (new_doc, new_key) = doc.insert_after_key(&last_key, vec![ch]).unwrap().unwrap();
             doc = new_doc;
             last_key = new_key;
         }
@@ -2604,7 +2663,7 @@ mod test {
         }
         collect_chars(&doc, &mut chars_vec);
         let final_text = String::from_utf8(chars_vec).unwrap();
-        
+
         println!("Final document: {}", final_text);
         println!("Final tree size: {}", doc.subtree_size());
 
@@ -2625,11 +2684,11 @@ mod test {
     fn test_new_list_node_with_key() {
         // Test creating a list node with a client-provided key
         use uuid::Uuid;
-        
+
         let my_uuid = Uuid::new_v4();
         let my_key = my_uuid.as_bytes().to_vec();
         let node = TreeNode::new_list_node_with_key(my_key.clone(), vec![b'x']).unwrap();
-        
+
         // Verify the key matches what we provided
         assert_eq!(node.key(), my_key.as_slice());
         assert_eq!(node.inner.kv.value_as_slice(), &[b'x']);
@@ -2641,12 +2700,12 @@ mod test {
     #[cfg(all(feature = "list_mode", feature = "uuid"))]
     fn test_insert_at_position_with_key() {
         use uuid::Uuid;
-        
+
         // Build initial tree with server-generated keys: [a, b, c]
-        let mut tree = TreeNode::new_list_node(vec![b'a']).unwrap();
+        let tree = TreeNode::new_list_node(vec![b'a']).unwrap();
         let (tree, _) = tree.insert_at_position(1, vec![b'b']).unwrap().unwrap();
         let (tree, _) = tree.insert_at_position(2, vec![b'c']).unwrap().unwrap();
-        
+
         // Client picks UUID for 'x' and inserts at position 1
         let client_uuid_x = Uuid::new_v4();
         let key_x = client_uuid_x.as_bytes().to_vec();
@@ -2654,10 +2713,10 @@ mod test {
             .insert_at_position_with_key(1, key_x.clone(), vec![b'x'])
             .unwrap()
             .unwrap();
-        
+
         // Verify returned key matches what client provided
         assert_eq!(returned_key, key_x);
-        
+
         // Verify in-order traversal: [a, x, b, c]
         let mut values = Vec::new();
         let mut keys = Vec::new();
@@ -2672,11 +2731,11 @@ mod test {
             }
         }
         collect(&tree, &mut values, &mut keys);
-        
+
         assert_eq!(values, vec![vec![b'a'], vec![b'x'], vec![b'b'], vec![b'c']]);
         assert_eq!(keys[1], key_x); // 'x' is at position 1
         assert_eq!(tree.subtree_size(), 4);
-        
+
         // Client picks another UUID for 'y' and inserts at position 0
         let client_uuid_y = Uuid::new_v4();
         let key_y = client_uuid_y.as_bytes().to_vec();
@@ -2684,15 +2743,18 @@ mod test {
             .insert_at_position_with_key(0, key_y.clone(), vec![b'y'])
             .unwrap()
             .unwrap();
-        
+
         assert_eq!(returned_key, key_y);
-        
+
         // Verify in-order traversal: [y, a, x, b, c]
         values.clear();
         keys.clear();
         collect(&tree, &mut values, &mut keys);
-        
-        assert_eq!(values, vec![vec![b'y'], vec![b'a'], vec![b'x'], vec![b'b'], vec![b'c']]);
+
+        assert_eq!(
+            values,
+            vec![vec![b'y'], vec![b'a'], vec![b'x'], vec![b'b'], vec![b'c']]
+        );
         assert_eq!(keys[0], key_y); // 'y' is at position 0
         assert_eq!(tree.subtree_size(), 5);
     }
@@ -2701,16 +2763,16 @@ mod test {
     #[cfg(all(feature = "list_mode", feature = "uuid"))]
     fn test_client_controlled_collaborative_editing() {
         use uuid::Uuid;
-        
+
         // Simulate scenario where client picks UUIDs locally for optimistic updates
         println!("\n=== Client-Controlled Collaborative Editing ===");
-        
+
         // Client A: Initialize document with 'H' (client picks UUID)
         let uuid_h = Uuid::new_v4();
         let key_h = uuid_h.as_bytes().to_vec();
-        let mut doc = TreeNode::new_list_node_with_key(key_h.clone(), vec![b'H']).unwrap();
+        let doc = TreeNode::new_list_node_with_key(key_h.clone(), vec![b'H']).unwrap();
         println!("Client A creates 'H' with UUID: {}", uuid_h);
-        
+
         // Client A: Add 'i' after 'H' (client picks UUID)
         let uuid_i = Uuid::new_v4();
         let key_i = uuid_i.as_bytes().to_vec();
@@ -2719,7 +2781,7 @@ mod test {
             .unwrap()
             .unwrap();
         println!("Client A inserts 'i' with UUID: {}", uuid_i);
-        
+
         // Client B: Concurrently inserts '!' at end (client picks UUID)
         let uuid_bang = Uuid::new_v4();
         let key_bang = uuid_bang.as_bytes().to_vec();
@@ -2728,7 +2790,7 @@ mod test {
             .unwrap()
             .unwrap();
         println!("Client B inserts '!' with UUID: {}", uuid_bang);
-        
+
         // Extract document text
         let mut chars = Vec::new();
         fn collect_chars(node: &TreeNode, chars: &mut Vec<u8>) {
@@ -2742,11 +2804,11 @@ mod test {
         }
         collect_chars(&doc, &mut chars);
         let text = String::from_utf8(chars).unwrap();
-        
+
         println!("Final document: {}", text);
         assert_eq!(text, "Hi!");
         assert_eq!(doc.subtree_size(), 3);
-        
+
         // Verify all client-provided keys are present
         let mut found_keys = Vec::new();
         fn collect_keys(node: &TreeNode, keys: &mut Vec<Vec<u8>>) {
@@ -2759,11 +2821,11 @@ mod test {
             }
         }
         collect_keys(&doc, &mut found_keys);
-        
+
         assert!(found_keys.contains(&key_h));
         assert!(found_keys.contains(&key_i));
         assert!(found_keys.contains(&key_bang));
-        
+
         println!("=== All client-provided UUIDs preserved ===");
     }
 
@@ -2780,27 +2842,27 @@ mod test {
         //     2
         //    / \
         //   1   3
-        
+
         let mut tree = TreeNode::new_list_node(vec![3]).unwrap();
         let (new_tree, _) = tree.insert_at_position(0, vec![2]).unwrap().unwrap();
         tree = new_tree;
         let (new_tree, _) = tree.insert_at_position(0, vec![1]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Check the tree is balanced (root should be 2)
         let root_value = tree.value_as_slice().to_vec();
         assert_eq!(root_value, vec![2]);
-        
+
         // Check structure
         assert!(tree.child(true).is_some());
         assert!(tree.child(false).is_some());
         assert_eq!(tree.child(true).unwrap().value_as_slice(), &[1]);
         assert_eq!(tree.child(false).unwrap().value_as_slice(), &[3]);
-        
+
         // Check balance factor is within [-1, 1]
         let bf = tree.balance_factor();
         assert!(bf >= -1 && bf <= 1, "Balance factor {} out of range", bf);
-        
+
         println!("=== Right rotation test passed ===");
     }
 
@@ -2817,31 +2879,30 @@ mod test {
         //     2
         //    / \
         //   1   3
-        
+
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
         let (new_tree, _) = tree.insert_at_position(1, vec![2]).unwrap().unwrap();
         tree = new_tree;
         let (new_tree, _) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Check the tree is balanced (root should be 2)
         let root_value = tree.value_as_slice().to_vec();
         assert_eq!(root_value, vec![2]);
-        
+
         // Check structure
         assert!(tree.child(true).is_some());
         assert!(tree.child(false).is_some());
         assert_eq!(tree.child(true).unwrap().value_as_slice(), &[1]);
         assert_eq!(tree.child(false).unwrap().value_as_slice(), &[3]);
-        
+
         // Check balance factor
         let bf = tree.balance_factor();
         assert!(bf >= -1 && bf <= 1, "Balance factor {} out of range", bf);
-        
+
         println!("=== Left rotation test passed ===");
     }
 
-    #[test]
     #[test]
     #[cfg(feature = "list_mode")]
     fn test_double_rotation_left_right() {
@@ -2855,27 +2916,27 @@ mod test {
         //     2
         //    / \
         //   1   3
-        
+
         let mut tree = TreeNode::new_list_node(vec![3]).unwrap();
         let (new_tree, _) = tree.insert_at_position(0, vec![1]).unwrap().unwrap();
         tree = new_tree;
         let (new_tree, _) = tree.insert_at_position(1, vec![2]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Check the tree is balanced (root should be 2)
         let root_value = tree.value_as_slice().to_vec();
         assert_eq!(root_value, vec![2]);
-        
+
         // Check structure
         assert!(tree.child(true).is_some());
         assert!(tree.child(false).is_some());
         assert_eq!(tree.child(true).unwrap().value_as_slice(), &[1]);
         assert_eq!(tree.child(false).unwrap().value_as_slice(), &[3]);
-        
+
         // Check balance factor
         let bf = tree.balance_factor();
         assert!(bf >= -1 && bf <= 1, "Balance factor {} out of range", bf);
-        
+
         println!("=== LR double rotation test passed ===");
     }
 
@@ -2892,27 +2953,27 @@ mod test {
         //     2
         //    / \
         //   1   3
-        
+
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
         let (new_tree, _) = tree.insert_at_position(1, vec![3]).unwrap().unwrap();
         tree = new_tree;
         let (new_tree, _) = tree.insert_at_position(1, vec![2]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Check the tree is balanced (root should be 2)
         let root_value = tree.value_as_slice().to_vec();
         assert_eq!(root_value, vec![2]);
-        
+
         // Check structure
         assert!(tree.child(true).is_some());
         assert!(tree.child(false).is_some());
         assert_eq!(tree.child(true).unwrap().value_as_slice(), &[1]);
         assert_eq!(tree.child(false).unwrap().value_as_slice(), &[3]);
-        
+
         // Check balance factor
         let bf = tree.balance_factor();
         assert!(bf >= -1 && bf <= 1, "Balance factor {} out of range", bf);
-        
+
         println!("=== RL double rotation test passed ===");
     }
 
@@ -2921,23 +2982,27 @@ mod test {
     fn test_balanced_sequential_insertions() {
         // Insert elements sequentially at the end (worst case for non-AVL)
         // With AVL balancing, the tree height should stay O(log n)
-        
+
         let mut tree = TreeNode::new_list_node(vec![0]).unwrap();
-        
+
         // Insert 15 more elements sequentially
         for i in 1..16 {
             let (new_tree, _) = tree.insert_at_position(i, vec![i as u8]).unwrap().unwrap();
             tree = new_tree;
         }
-        
+
         // Check tree has all elements
         assert_eq!(tree.subtree_size(), 16);
-        
+
         // Check height is logarithmic (for 16 nodes, height should be at most 5)
         // Without balancing, sequential insertions would create height 16
         let height = tree.height();
-        assert!(height <= 5, "Height {} too large for 16 nodes, AVL balancing not working", height);
-        
+        assert!(
+            height <= 5,
+            "Height {} too large for 16 nodes, AVL balancing not working",
+            height
+        );
+
         // Verify we can traverse all positions
         let mut values = Vec::new();
         fn collect_values(node: &TreeNode, values: &mut Vec<Vec<u8>>) {
@@ -2950,52 +3015,63 @@ mod test {
             }
         }
         collect_values(&tree, &mut values);
-        
+
         // Should have all values in order
         assert_eq!(values.len(), 16);
         for (idx, val) in values.iter().enumerate() {
             assert_eq!(*val, vec![idx as u8]);
         }
-        
-        println!("=== Sequential insertions stayed balanced: height {} for 16 nodes ===", height);
+
+        println!(
+            "=== Sequential insertions stayed balanced: height {} for 16 nodes ===",
+            height
+        );
     }
 
     #[test]
     #[cfg(feature = "list_mode")]
     fn test_parent_pointers_after_rotation() {
         // Verify parent pointers remain correct after rotations
-        
+
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
         tree.enable_parent_pointers_recursive(); // Enable parent pointers for this test
-        
+
         let (new_tree, _) = tree.insert_at_position(1, vec![2]).unwrap().unwrap();
         let mut tree = new_tree;
         tree.enable_parent_pointers_recursive();
-        
+
         let (new_tree, _) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
         let mut tree = new_tree;
         tree.enable_parent_pointers_recursive();
-        
+
         // After balancing, tree structure is:
         //     2
         //    / \
         //   1   3
-        
+
         // Root should have no parent
         assert!(tree.parent_key.is_none(), "Root should have no parent");
-        
+
         // Left child should point to root
         let left = tree.child(true).unwrap();
         assert!(left.parent_key.is_some(), "Left child should have parent");
         assert_eq!(left.parent_key.as_ref().unwrap(), tree.key());
-        assert_eq!(left.child_side, Some(true), "Left child should know it's on left");
-        
+        assert_eq!(
+            left.child_side,
+            Some(true),
+            "Left child should know it's on left"
+        );
+
         // Right child should point to root
         let right = tree.child(false).unwrap();
         assert!(right.parent_key.is_some(), "Right child should have parent");
         assert_eq!(right.parent_key.as_ref().unwrap(), tree.key());
-        assert_eq!(right.child_side, Some(false), "Right child should know it's on right");
-        
+        assert_eq!(
+            right.child_side,
+            Some(false),
+            "Right child should know it's on right"
+        );
+
         println!("=== Parent pointers correct after rotation ===");
     }
 
@@ -3003,32 +3079,32 @@ mod test {
     #[cfg(feature = "list_mode")]
     fn test_subtree_size_after_rotation() {
         // Verify subtree sizes remain correct after rotations
-        
+
         let mut tree = TreeNode::new_list_node(vec![1]).unwrap();
         let (new_tree, _) = tree.insert_at_position(1, vec![2]).unwrap().unwrap();
         tree = new_tree;
         let (new_tree, _) = tree.insert_at_position(2, vec![3]).unwrap().unwrap();
         tree = new_tree;
-        
+
         // Total size should be 3
         assert_eq!(tree.subtree_size(), 3);
-        
+
         // Left subtree size should be 1
         let left = tree.child(true).unwrap();
         assert_eq!(left.subtree_size(), 1);
-        
+
         // Right subtree size should be 1
         let right = tree.child(false).unwrap();
         assert_eq!(right.subtree_size(), 1);
-        
+
         // Add more nodes and verify sizes
         let (new_tree, _) = tree.insert_at_position(0, vec![0]).unwrap().unwrap();
         tree = new_tree;
         let (new_tree, _) = tree.insert_at_position(4, vec![4]).unwrap().unwrap();
         tree = new_tree;
-        
+
         assert_eq!(tree.subtree_size(), 5);
-        
+
         println!("=== Subtree sizes correct after rotations ===");
     }
 
@@ -3036,18 +3112,18 @@ mod test {
     #[cfg(feature = "list_mode")]
     fn test_deletion_maintains_balance() {
         // Build a balanced tree and delete elements, checking balance is maintained
-        
+
         let mut tree = TreeNode::new_list_node(vec![0]).unwrap();
-        
+
         // Insert 7 elements (will create a balanced tree)
         for i in 1..8 {
             let (new_tree, _) = tree.insert_at_position(i, vec![i as u8]).unwrap().unwrap();
             tree = new_tree;
         }
-        
+
         let initial_height = tree.height();
         println!("Initial height with 8 nodes: {}", initial_height);
-        
+
         // Delete some elements
         let (new_tree, _, _) = tree.delete_at_position(0).unwrap().unwrap();
         tree = new_tree;
@@ -3055,19 +3131,23 @@ mod test {
         tree = new_tree;
         let (new_tree, _, _) = tree.delete_at_position(0).unwrap().unwrap();
         tree = new_tree;
-        
+
         // 5 nodes remain
         assert_eq!(tree.subtree_size(), 5);
-        
+
         // Height should still be balanced (at most 3 for 5 nodes)
         let final_height = tree.height();
-        assert!(final_height <= 3, "Height {} too large for 5 nodes after deletions", final_height);
-        
+        assert!(
+            final_height <= 3,
+            "Height {} too large for 5 nodes after deletions",
+            final_height
+        );
+
         // Check all balance factors are valid
         fn check_balance_factors(node: &TreeNode) {
             let bf = node.balance_factor();
             assert!(bf >= -1 && bf <= 1, "Balance factor {} out of range", bf);
-            
+
             if let Some(left) = node.child(true) {
                 check_balance_factors(left);
             }
@@ -3076,42 +3156,56 @@ mod test {
             }
         }
         check_balance_factors(&tree);
-        
-        println!("=== Deletions maintained balance: height {} for 5 nodes ===", final_height);
+
+        println!(
+            "=== Deletions maintained balance: height {} for 5 nodes ===",
+            final_height
+        );
     }
 
     #[test]
     #[cfg(feature = "list_mode")]
     fn test_large_tree_stays_balanced() {
         // Insert 100 elements and verify height stays O(log n)
-        
+
         let mut tree = TreeNode::new_list_node(vec![0]).unwrap();
-        
+
         // Insert 99 more elements at various positions to stress-test rotations
         for i in 1..100 {
             // Insert at end sometimes, at beginning sometimes, in middle sometimes
             let pos = match i % 3 {
-                0 => 0,                      // Insert at beginning
-                1 => tree.subtree_size(),    // Insert at end
+                0 => 0,                       // Insert at beginning
+                1 => tree.subtree_size(),     // Insert at end
                 _ => tree.subtree_size() / 2, // Insert in middle
             };
-            let (new_tree, _) = tree.insert_at_position(pos, vec![i as u8]).unwrap().unwrap();
+            let (new_tree, _) = tree
+                .insert_at_position(pos, vec![i as u8])
+                .unwrap()
+                .unwrap();
             tree = new_tree;
         }
-        
+
         assert_eq!(tree.subtree_size(), 100);
-        
+
         // Height for 100 nodes should be at most 8
         // Perfect binary tree: 2^7 = 128 nodes at height 7, so 100 nodes should be around 7-8
         // Without balancing, could be up to 100
         let height = tree.height();
-        assert!(height <= 8, "Height {} too large for 100 nodes, AVL balancing insufficient", height);
-        
+        assert!(
+            height <= 8,
+            "Height {} too large for 100 nodes, AVL balancing insufficient",
+            height
+        );
+
         // Verify all balance factors are valid
         fn check_all_balance_factors(node: &TreeNode) {
             let bf = node.balance_factor();
-            assert!(bf >= -1 && bf <= 1, "Balance factor {} out of range at node", bf);
-            
+            assert!(
+                bf >= -1 && bf <= 1,
+                "Balance factor {} out of range at node",
+                bf
+            );
+
             if let Some(left) = node.child(true) {
                 check_all_balance_factors(left);
             }
@@ -3120,15 +3214,10 @@ mod test {
             }
         }
         check_all_balance_factors(&tree);
-        
-        println!("=== Large tree (100 nodes) stayed balanced: height {} ===", height);
+
+        println!(
+            "=== Large tree (100 nodes) stayed balanced: height {} ===",
+            height
+        );
     }
 }
-
-
-
-
-
-
-
-

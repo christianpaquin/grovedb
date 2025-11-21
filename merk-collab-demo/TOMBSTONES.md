@@ -64,22 +64,14 @@ let op = ListOp::InsertAtPositionWithKey {
 ### Delete Operation (Tombstone)
 
 ```rust
-// Two-step atomic batch operation:
-let ops = vec![
-    // 1. Delete the existing entry
-    ListOp::DeleteAtPosition {
-        position: position as u64,
-    },
-    // 2. Re-insert with same UUID, marked as deleted
-    ListOp::InsertAtPositionWithKey {
-        position: position as u64,
-        key: uuid,  // SAME UUID
-        value: vec![1, 'a' as u8],  // [deleted=1, char='a']
-    },
-];
+// Single-op in-place update
+let op = ListOp::UpdateValueByKey {
+  key: uuid.clone(),
+  value: vec![1, 'a' as u8],  // [deleted=1, char='a']
+};
 ```
 
-**Result**: Character still exists at same position with same UUID, but marked as tombstone
+**Result**: Character keeps the same UUID/position — only the value flips to “deleted”
 
 ### Display Logic
 

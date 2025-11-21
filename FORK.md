@@ -8,7 +8,7 @@
 
 This fork adds `list_mode` functionality to Merk, enabling positional (index-based) semantics over Merkle trees with cryptographic proofs. The implementation uses subtree sizes and persisted parent pointers for O(log n) position lookups, random UUID keys, and includes performance optimizations (node index for O(1) lookups). A full collaborative editing demo implements Matt Weidner's "Text Without CRDTs" design with zero-latency typing, reference-based operations, and independent proof verification.
 
-**17 commits** implementing list mode core, positional proofs, performance optimizations, and collaborative demo. All 272+ Merk tests passing.
+**Many commits** implementing list mode core, positional proofs, performance optimizations, and collaborative demo. All 272+ Merk tests and demo tests passing.
 
 ## Documentation
 

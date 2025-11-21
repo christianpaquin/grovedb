@@ -20,7 +20,7 @@ This demo implements [Matt Weidner's "Text Without CRDTs"](https://mattweidner.c
 - **Clients** generate UUIDs locally and show changes immediately (zero latency!)
 - **Protocol** uses reference-based operations (operations reference UUIDs, not positions)
 - **Server** maintains the authoritative Merkle tree (using Merk with `list_mode`)
-- **Implementation** converts UUIDs to positions server-side (hybrid approach for reliability)
+- **Implementation** applies reference-based ops (`InsertAfterKeyWithKey`, `UpdateValueByKey`); positions are only derived afterwards for proofs
 - **Server** generates Merkle proofs and publishes them to an audit changelog
 - **Auditor** can independently verify server behavior by checking the changelog
 - **No CRDTs needed** - server is the source of truth for operation ordering
@@ -97,14 +97,13 @@ TypeScript + Vite application:
 Axum-based server that:
 - Maintains Merk tree with `list_mode` feature
 - Accepts reference-based operations (client sends `target_uuid`)
-- Uses Merk's built-in node index for O(1) UUID→position lookups
-- Converts `target_uuid` to tree position before applying operation
+- Uses Merk's built-in node index for O(1) UUID lookups (positions only needed for proof queries)
+- Applies `InsertAfterKeyWithKey` for inserts and `UpdateValueByKey` for tombstones — no positional delete reinserts
 - Handles insert/delete operations with client-provided UUIDs
 - Generates Merkle proofs using `merk.prove_position()`
 - Broadcasts updates to all clients via WebSocket
 - Uses TempStorage (in-memory) for demo purposes
 - **Publishes changelog file with proofs for audit trail**
-- **Hybrid approach**: Reference-based protocol, position-based implementation
 
 ### 3. `auditor/` - Verification Tool (✅ Implemented)
 Standalone Rust tool that:
@@ -158,8 +157,8 @@ Open http://localhost:5173 in multiple browser tabs and start typing!
 3. Client finds `target_uuid` (UUID of character at position N-1)
 4. Client sends: `{ type: 'insert', target_uuid: 'previous-char-uuid', uuid: 'new-uuid', value: 'char' }`
 5. **[Real system: Client signs operation with user private key]**
-6. Server looks up `target_uuid` in cache to find tree position
-7. Server applies: `InsertAtPositionWithKey { position: tree_pos, key: uuid, value }`
+6. Server uses its UUID index to confirm `target_uuid` exists (position discovery is for proof generation only)
+7. Server applies: `InsertAfterKeyWithKey { target_key: target_uuid, key: uuid, value }` (or `InsertAtPositionWithKey` when inserting at the head)
 8. Server generates Merkle proof for audit trail
 9. **Server appends to changelog: `[op_index, op, target_uuid, uuid, value, proof, new_root_hash]`**
 10. Server broadcasts to all clients: `{ type: 'operation', operation: 'insert', target_uuid, uuid, value, root_hash }`
@@ -186,7 +185,7 @@ Following Matt Weidner's ["Text Without CRDTs"](https://mattweidner.com/2025/05/
   - `char_byte`: the character value
 - **UUIDs persist** - deleted items keep their UUID so other clients can reference them
 - **Positions stable** - tombstones maintain tree positions for concurrent operations
-- **Delete operation**: Delete + Re-insert with same UUID but marked as deleted
+- **Delete operation**: `UpdateValueByKey { key: uuid, value: [1, char] }` (in-place tombstone)
 - **Display**: Clients filter out tombstones when showing content
 
 **Why tombstones matter for collaboration:**

@@ -929,7 +929,8 @@ where
         );
 
         // attach grandchild to self
-        let rotated = tree.attach(left, maybe_grandchild)
+        let rotated = tree
+            .attach(left, maybe_grandchild)
             .maybe_balance(value_defined_cost_fn, grove_version)
             .flat_map_ok(|tree| {
                 // attach self to child, return child

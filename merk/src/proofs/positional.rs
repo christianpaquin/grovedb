@@ -10,7 +10,10 @@ use grovedb_version::version::GroveVersion;
 
 #[cfg(feature = "list_mode")]
 use crate::{
-    proofs::{tree::execute, Decoder, Node, Op, Tree},
+    proofs::{
+        tree::{execute, Child, Tree},
+        Decoder, Node, Op,
+    },
     tree::{kv::ValueDefinedCostType, CryptoHash, RefWalker},
     Error,
 };
@@ -59,32 +62,35 @@ where
     /// Helper function to compute a tree node's hash without parent_key
     /// This recursively computes child hashes without parent_key as well
     #[cfg(feature = "list_mode")]
-    fn compute_hash_without_parent_key_recursive(tree: &crate::tree::TreeNode) -> CostContext<CryptoHash> {
+    fn compute_hash_without_parent_key_recursive(
+        tree: &crate::tree::TreeNode,
+    ) -> CostContext<CryptoHash> {
         use crate::tree::hash::node_hash_list_mode;
         let mut cost = OperationCost::default();
-        
+
         // Recursively compute child hashes without parent_key
         let left_hash = if let Some(left_child) = tree.child(true) {
             Self::compute_hash_without_parent_key_recursive(left_child).unwrap_add_cost(&mut cost)
         } else {
             crate::tree::NULL_HASH
         };
-        
+
         let right_hash = if let Some(right_child) = tree.child(false) {
             Self::compute_hash_without_parent_key_recursive(right_child).unwrap_add_cost(&mut cost)
         } else {
             crate::tree::NULL_HASH
         };
-        
+
         node_hash_list_mode(
             tree.inner.kv.hash(),
             &left_hash,
             &right_hash,
             tree.subtree_size(),
             &None, // Always use None for proofs
-        ).add_cost(cost)
+        )
+        .add_cost(cost)
     }
-    
+
     /// Helper to call the recursive hash computation
     #[cfg(feature = "list_mode")]
     fn hash_without_parent_key(&self) -> CostContext<CryptoHash> {
@@ -109,7 +115,12 @@ where
         let key = tree.key().to_vec();
         let value = tree.value_as_slice().to_vec();
         let value_hash = *tree.value_hash(); // Copy the value hash
-        
+        let parent_key = if tree.use_parent_pointers {
+            tree.parent_key.clone()
+        } else {
+            None
+        };
+
         #[cfg(test)]
         {
             let kv_hash = *tree.inner.kv.hash(); // Get the kv_hash from the original tree
@@ -117,19 +128,21 @@ where
             eprintln!("[NAVIGATE] Node in original tree: key={:?}, value_hash={:?}, kv_hash={:?}, node_hash={:?}", 
                 String::from_utf8_lossy(&key), value_hash, kv_hash, node_hash);
         }
-        
+
         #[cfg(test)]
-        eprintln!("[NAVIGATE] target_pos={}, accum_pos={}, value={:?}, subtree_size={}", 
-            target_position, accumulated_position, std::str::from_utf8(&value).unwrap_or("<binary>"), subtree_size);
-        
-        let left_size = tree
-            .child(true)
-            .map(|c| c.subtree_size())
-            .unwrap_or(0);
-            
+        eprintln!(
+            "[NAVIGATE] target_pos={}, accum_pos={}, value={:?}, subtree_size={}",
+            target_position,
+            accumulated_position,
+            std::str::from_utf8(&value).unwrap_or("<binary>"),
+            subtree_size
+        );
+
+        let left_size = tree.child(true).map(|c| c.subtree_size()).unwrap_or(0);
+
         let has_left_link = tree.link(true).is_some();
         let has_right_link = tree.link(false).is_some();
-        
+
         // Check if we have modified links (which would cause issues)
         if let Some(left_link) = tree.link(true) {
             if matches!(left_link, crate::tree::Link::Modified { .. }) {
@@ -147,90 +160,150 @@ where
                 .wrap_with_cost(cost);
             }
         }
-        
+
         // Extract child hashes - MUST recompute without parent_key for proofs!
         // The cached hash in the Link was computed WITH parent_key, but proofs use parent_key=None
         let left_child_info = if has_left_link {
             let left_walker = cost_return_on_error!(
                 &mut cost,
-                self.walk(true, None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version)
-            ).expect("Left link exists but walk failed");
+                self.walk(
+                    true,
+                    None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
+                    grove_version
+                )
+            )
+            .expect("Left link exists but walk failed");
             let size = left_walker.tree().subtree_size();
-            let hash = left_walker.hash_without_parent_key().unwrap_add_cost(&mut cost);
+            let height = left_walker.tree().height();
+            let hash = left_walker
+                .hash_without_parent_key()
+                .unwrap_add_cost(&mut cost);
             #[cfg(test)]
-            eprintln!("[NAVIGATE] Left child hash (recomputed without parent_key): hash={:?}, size={}", hash, size);
-            Some((hash, size))
+            eprintln!(
+                "[NAVIGATE] Left child hash (recomputed without parent_key): hash={:?}, size={}",
+                hash, size
+            );
+            Some((hash, size, height))
         } else {
             None
         };
-        
+
         let right_child_info = if has_right_link {
             let right_walker = cost_return_on_error!(
                 &mut cost,
-                self.walk(false, None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>, grove_version)
-            ).expect("Right link exists but walk failed");
+                self.walk(
+                    false,
+                    None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
+                    grove_version
+                )
+            )
+            .expect("Right link exists but walk failed");
             let size = right_walker.tree().subtree_size();
-            let hash = right_walker.hash_without_parent_key().unwrap_add_cost(&mut cost);
+            let height = right_walker.tree().height();
+            let hash = right_walker
+                .hash_without_parent_key()
+                .unwrap_add_cost(&mut cost);
             #[cfg(test)]
-            eprintln!("[NAVIGATE] Right child hash (recomputed without parent_key): hash={:?}, size={}", hash, size);
-            Some((hash, size))
+            eprintln!(
+                "[NAVIGATE] Right child hash (recomputed without parent_key): hash={:?}, size={}",
+                hash, size
+            );
+            Some((hash, size, height))
         } else {
             None
-        };        // Calculate position of current node
+        }; // Calculate position of current node
         let current_node_position = accumulated_position + left_size;
 
         #[cfg(test)]
-        eprintln!("[NAVIGATE] current_pos={}, left_size={}, has_left={}, has_right={}", 
-            current_node_position, left_size, left_child_info.is_some(), right_child_info.is_some());
+        eprintln!(
+            "[NAVIGATE] current_pos={}, left_size={}, has_left={}, has_right={}",
+            current_node_position,
+            left_size,
+            left_child_info.is_some(),
+            right_child_info.is_some()
+        );
 
         // Determine where target is relative to current node
         if target_position == current_node_position {
             #[cfg(test)]
-            eprintln!("[NAVIGATE] FOUND TARGET at position {}", current_node_position);
-            
+            eprintln!(
+                "[NAVIGATE] FOUND TARGET at position {}",
+                current_node_position
+            );
+
             // Found the target node!
             // For list-mode proofs, include the value hash instead of raw KV
             // This ensures proper hash verification since list-mode uses different hashing
-            
+
             #[cfg(test)]
-            eprintln!("[NAVIGATE] Pushing target node: key={:?}, value_hash={:?}, subtree_size={}", 
-                String::from_utf8_lossy(&key), value_hash, subtree_size);
-            
-            let node = Node::KVValueHashWithSubtreeSize(key, value, value_hash, subtree_size);
+            eprintln!(
+                "[NAVIGATE] Pushing target node: key={:?}, value_hash={:?}, subtree_size={}",
+                String::from_utf8_lossy(&key),
+                value_hash,
+                subtree_size
+            );
+
+            let node = Node::KVValueHashWithSubtreeSize(
+                key,
+                value,
+                value_hash,
+                subtree_size,
+                parent_key.clone(),
+            );
             proof_ops.push(Op::Push(node));
 
             // Add sibling hashes if they exist
-            if let Some((left_hash, left_size)) = left_child_info {
+            if let Some((left_hash, left_size, left_height)) = left_child_info {
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Target has left child: hash={:?}, size={}", left_hash, left_size);
-                
+                eprintln!(
+                    "[NAVIGATE] Target has left child: hash={:?}, size={}",
+                    left_hash, left_size
+                );
+
                 proof_ops.insert(
                     0,
-                    Op::Push(Node::HashWithSubtreeSize(left_hash, left_size)),
+                    Op::Push(Node::HashWithSubtreeSize(
+                        left_hash,
+                        left_size,
+                        Some(left_height),
+                    )),
                 );
                 proof_ops.push(Op::Parent);
                 #[cfg(test)]
                 eprintln!("[NAVIGATE] Added left child hash and Parent op");
             }
 
-            if let Some((right_hash, right_size)) = right_child_info {
+            if let Some((right_hash, right_size, right_height)) = right_child_info {
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Target has right child: hash={:?}, size={}", right_hash, right_size);
-                
-                proof_ops.push(Op::Push(Node::HashWithSubtreeSize(right_hash, right_size)));
+                eprintln!(
+                    "[NAVIGATE] Target has right child: hash={:?}, size={}",
+                    right_hash, right_size
+                );
+
+                proof_ops.push(Op::Push(Node::HashWithSubtreeSize(
+                    right_hash,
+                    right_size,
+                    Some(right_height),
+                )));
                 proof_ops.push(Op::Child);
                 #[cfg(test)]
                 eprintln!("[NAVIGATE] Added right child hash and Child op");
             }
 
             #[cfg(test)]
-            eprintln!("[NAVIGATE] Returning {} operations for target node", proof_ops.len());
+            eprintln!(
+                "[NAVIGATE] Returning {} operations for target node",
+                proof_ops.len()
+            );
 
             return Ok((proof_ops, current_node_position)).wrap_with_cost(cost);
         } else if target_position < current_node_position {
             #[cfg(test)]
-            eprintln!("[NAVIGATE] Going LEFT (target {} < current {})", target_position, current_node_position);
-            
+            eprintln!(
+                "[NAVIGATE] Going LEFT (target {} < current {})",
+                target_position, current_node_position
+            );
+
             // Target is in left subtree
             if has_left_link {
                 // Walk to left child
@@ -242,7 +315,7 @@ where
                         grove_version
                     )
                 );
-                
+
                 let mut left_walker = match maybe_left_walker {
                     Some(walker) => walker,
                     None => {
@@ -256,42 +329,69 @@ where
                 // Recursively get proof from left subtree
                 let (left_proof, found_pos) = cost_return_on_error!(
                     &mut cost,
-                    left_walker.navigate_to_position(target_position, accumulated_position, grove_version)
+                    left_walker.navigate_to_position(
+                        target_position,
+                        accumulated_position,
+                        grove_version
+                    )
                 );
 
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Returned from LEFT recursion with {} ops", left_proof.len());
+                eprintln!(
+                    "[NAVIGATE] Returned from LEFT recursion with {} ops",
+                    left_proof.len()
+                );
 
                 proof_ops.extend(left_proof);
 
                 // Add current node with subtree info (ancestor node on path to target)
                 // Use KVValueHashWithSubtreeSize for proper list-mode hashing
-                
+
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Pushing ancestor node: key={:?}, value_hash={:?}, subtree_size={}", 
-                    String::from_utf8_lossy(&key), value_hash, subtree_size);
-                
-                let node = Node::KVValueHashWithSubtreeSize(key, value, value_hash, subtree_size);
+                eprintln!(
+                    "[NAVIGATE] Pushing ancestor node: key={:?}, value_hash={:?}, subtree_size={}",
+                    String::from_utf8_lossy(&key),
+                    value_hash,
+                    subtree_size
+                );
+
+                let node = Node::KVValueHashWithSubtreeSize(
+                    key,
+                    value,
+                    value_hash,
+                    subtree_size,
+                    parent_key.clone(),
+                );
                 proof_ops.push(Op::Push(node));
-                proof_ops.push(Op::Parent);  // Connect left child to current node
-                
+                proof_ops.push(Op::Parent); // Connect left child to current node
+
                 #[cfg(test)]
                 eprintln!("[NAVIGATE] Added ancestor node and Parent op");
 
                 // Add right child hash if exists
-                if let Some((right_hash, right_size)) = right_child_info {
+                if let Some((right_hash, right_size, right_height)) = right_child_info {
                     #[cfg(test)]
-                    eprintln!("[NAVIGATE] Adding right sibling: hash={:?}, size={}", right_hash, right_size);
-                    
-                    proof_ops.push(Op::Push(Node::HashWithSubtreeSize(right_hash, right_size)));
+                    eprintln!(
+                        "[NAVIGATE] Adding right sibling: hash={:?}, size={}",
+                        right_hash, right_size
+                    );
+
+                    proof_ops.push(Op::Push(Node::HashWithSubtreeSize(
+                        right_hash,
+                        right_size,
+                        Some(right_height),
+                    )));
                     proof_ops.push(Op::Child);
-                    
+
                     #[cfg(test)]
                     eprintln!("[NAVIGATE] Added right sibling hash and Child op");
                 }
 
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Returning {} operations from LEFT path", proof_ops.len());
+                eprintln!(
+                    "[NAVIGATE] Returning {} operations from LEFT path",
+                    proof_ops.len()
+                );
 
                 return Ok((proof_ops, found_pos)).wrap_with_cost(cost);
             } else {
@@ -302,8 +402,11 @@ where
             }
         } else {
             #[cfg(test)]
-            eprintln!("[NAVIGATE] Going RIGHT (target {} > current {})", target_position, current_node_position);
-            
+            eprintln!(
+                "[NAVIGATE] Going RIGHT (target {} > current {})",
+                target_position, current_node_position
+            );
+
             // Target is in right subtree
             if has_right_link {
                 // Walk to right child
@@ -315,7 +418,7 @@ where
                         grove_version
                     )
                 );
-                
+
                 let mut right_walker = match maybe_right_walker {
                     Some(walker) => walker,
                     None => {
@@ -337,20 +440,33 @@ where
                 );
 
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Returned from RIGHT recursion with {} ops", right_proof.len());
+                eprintln!(
+                    "[NAVIGATE] Returned from RIGHT recursion with {} ops",
+                    right_proof.len()
+                );
 
                 // Add left child hash if exists
-                if let Some((left_hash, left_size)) = left_child_info {
-                    proof_ops.push(Op::Push(Node::HashWithSubtreeSize(left_hash, left_size)));
+                if let Some((left_hash, left_size, left_height)) = left_child_info {
+                    proof_ops.push(Op::Push(Node::HashWithSubtreeSize(
+                        left_hash,
+                        left_size,
+                        Some(left_height),
+                    )));
                     #[cfg(test)]
                     eprintln!("[NAVIGATE] Added left sibling hash");
                 }
 
                 // Add current node (ancestor node on path to target)
                 // Use KVValueHashWithSubtreeSize for proper list-mode hashing
-                let node = Node::KVValueHashWithSubtreeSize(key, value, value_hash, subtree_size);
+                let node = Node::KVValueHashWithSubtreeSize(
+                    key,
+                    value,
+                    value_hash,
+                    subtree_size,
+                    parent_key.clone(),
+                );
                 proof_ops.push(Op::Push(node));
-                
+
                 #[cfg(test)]
                 eprintln!("[NAVIGATE] Added ancestor node");
 
@@ -363,9 +479,12 @@ where
                 // Add right subtree proof
                 proof_ops.extend(right_proof);
                 proof_ops.push(Op::Child);
-                
+
                 #[cfg(test)]
-                eprintln!("[NAVIGATE] Added right subtree proof and Child op. Total {} operations", proof_ops.len());
+                eprintln!(
+                    "[NAVIGATE] Added right subtree proof and Child op. Total {} operations",
+                    proof_ops.len()
+                );
 
                 return Ok((proof_ops, found_pos)).wrap_with_cost(cost);
             } else {
@@ -430,7 +549,7 @@ pub fn verify_positional_proof(
     // Decode the proof - Decoder is an Iterator that returns Result<Op, Error>
     let decoder = Decoder::new(proof_bytes);
     let mut proof_ops = LinkedList::new();
-    
+
     for op_result in decoder {
         match op_result {
             Ok(op) => proof_ops.push_back(op),
@@ -448,112 +567,19 @@ fn verify_positional_proof_internal(
     proof: LinkedList<Op>,
     position: u64,
     expected_root_hash: CryptoHash,
-    _grove_version: &GroveVersion,
+    grove_version: &GroveVersion,
 ) -> Result<PositionalProofResult, Error> {
-    #[cfg(test)]
-    eprintln!("\n[VERIFY] Starting verification for position {}", position);
-    #[cfg(test)]
-    eprintln!("[VERIFY] Expected root hash: {:?}", expected_root_hash);
-    #[cfg(test)]
-    eprintln!("[VERIFY] Processing {} proof operations", proof.len());
-    
-    // First, find and extract the target node data from the proof operations
-    // For leaf targets (which is most common), find the first leaf node with KV data
-    // Extract the target node by tracking position as we parse the proof structure
-    // The proof encodes the tree structure, and we need to find which node is at position
-    let (target_key, target_value) = {
-        let mut nodes: Vec<(Vec<u8>, Vec<u8>, u64)> = Vec::new(); // (key, value, left_subtree_size)
-        let mut found_target = None;
-        
-        #[cfg(test)]
-        eprintln!("[VERIFY] Scanning proof for node at position {}", position);
-        
-        // First pass: collect all KV nodes with their context
-        for op in proof.iter() {
-            #[cfg(test)]
-            eprintln!("[VERIFY] Op: {:?}", match op {
-                Op::Push(Node::KVValueHashWithSubtreeSize(k, _, _, s)) => 
-                    format!("Push(KVValueHashWithSubtreeSize(key={:?}, size={}))", String::from_utf8_lossy(k), s),
-                Op::Push(Node::KVWithSubtreeSize(k, _, s)) => 
-                    format!("Push(KVWithSubtreeSize(key={:?}, size={}))", String::from_utf8_lossy(k), s),
-                Op::Push(Node::HashWithSubtreeSize(_, s)) => 
-                    format!("Push(HashWithSubtreeSize(size={}))", s),
-                Op::Parent => "Parent".to_string(),
-                Op::Child => "Child".to_string(),
-                _ => format!("{:?}", op),
-            });
-            
-            match op {
-                Op::Push(Node::KVValueHashWithSubtreeSize(k, v, _, s)) | 
-                Op::Push(Node::KVWithSubtreeSize(k, v, s)) => {
-                    // Store node info - we'll calculate positions in second pass
-                    nodes.push((k.clone(), v.clone(), *s));
-                    
-                    #[cfg(test)]
-                    eprintln!("[VERIFY] Stored KV node: key={:?}, subtree_size={}", 
-                        String::from_utf8_lossy(k), s);
-                }
-                _ => {}
-            }
-        }
-        
-        // The target node is always a leaf node with subtree_size=1.
-        // In a properly constructed positional proof, there should be exactly one leaf node.
-        // If there are multiple KV nodes, the target is the one with size=1.
-        // If all have size>1 (shouldn't happen in leaf proofs), take the first one.
-        
-        let leaf_nodes: Vec<_> = nodes.iter()
-            .filter(|(_, _, size)| *size == 1)
-            .collect();
-        
-        if leaf_nodes.len() == 1 {
-            // Perfect - exactly one leaf node, this must be the target
-            let (key, value, _size) = leaf_nodes[0];
-            found_target = Some((key.clone(), value.clone()));
-            
-            #[cfg(test)]
-            eprintln!("[VERIFY] Found unique leaf node as target: key={:?}, size={}", 
-                String::from_utf8_lossy(key), _size);
-        } else if !leaf_nodes.is_empty() {
-            // Multiple leaf nodes - this shouldn't happen, but take the first one
-            let (key, value, _size) = leaf_nodes[0];
-            found_target = Some((key.clone(), value.clone()));
-            
-            #[cfg(test)]
-            eprintln!("[VERIFY] Multiple leaf nodes found ({}), using first: key={:?}, size={}", 
-                leaf_nodes.len(), String::from_utf8_lossy(key), _size);
-        } else if let Some((key, value, _size)) = nodes.first() {
-            // No leaf nodes (might be proving root of tree with children)
-            found_target = Some((key.clone(), value.clone()));
-            
-            #[cfg(test)]
-            eprintln!("[VERIFY] No leaf nodes, using first KV node as target: key={:?}, size={}", 
-                String::from_utf8_lossy(key), _size);
-        }
-        
-        found_target.ok_or_else(|| {
-            Error::InvalidProofError(format!(
-                "Could not find node at position {} in proof (found {} KV nodes)",
-                position, nodes.len()
-            ))
-        })?
-    };
-    
-    #[cfg(test)]
-    eprintln!("[VERIFY] Extracted target: key={:?}, value={:?}", 
-        String::from_utf8_lossy(&target_key), String::from_utf8_lossy(&target_value));
-    
     // Execute proof operations to reconstruct the tree
     // Convert LinkedList<Op> to Iterator<Item = Result<Op, Error>>
     let proof_iter = proof.into_iter().map(Ok);
-    let tree = execute(proof_iter, true, |_node| Ok(())).unwrap()?;
+    let tree = execute(proof_iter, false, |_node| Ok(())).unwrap()?;
 
     // Verify root hash
     let actual_root_hash = tree.hash().unwrap();
-    
+
     #[cfg(test)]
     eprintln!("[VERIFY] Actual root hash:   {:?}", actual_root_hash);
-    
+
     if actual_root_hash != expected_root_hash {
         return Err(Error::InvalidProofError(format!(
             "Root hash mismatch. Expected: {:?}, Got: {:?}",
@@ -564,23 +590,23 @@ fn verify_positional_proof_internal(
     #[cfg(test)]
     eprintln!("[VERIFY] Root hash matches!");
 
-    // The target node data was extracted from the first proof operation
-    // Now we need to verify the tree structure and get the tree size
-    let tree_size = match &tree.node {
-        Node::KVValueHashWithSubtreeSize(_, _, _, s) => *s,
-        Node::KVWithSubtreeSize(_, _, s) => *s,
-        Node::HashWithSubtreeSize(_, s) => *s,
-        _ => {
-            return Err(Error::InvalidProofError(
-                "Root node does not contain subtree size".to_string(),
-            ));
-        }
-    };
+    // The reconstructed tree now contains full subtree metadata. Capture the total size
+    // and re-derive the target node by walking the tree structure with subtree counts.
+    let tree_size = node_subtree_size(&tree.node).ok_or_else(|| {
+        Error::InvalidProofError("Root node does not contain subtree size".to_string())
+    })?;
 
-    #[cfg(test)]
-    eprintln!("[VERIFY] Position verified: {}, tree_size: {}", position, tree_size);
+    if position >= tree_size {
+        return Err(Error::InvalidProofError(format!(
+            "Requested position {} exceeds tree size {}",
+            position, tree_size
+        )));
+    }
 
-    // Return successful verification result
+    let (_confirmed_position, target_key, target_value, _) =
+        verify_position_in_tree(&tree, position, 0, grove_version)?;
+    let target_value = normalize_list_value(target_value);
+
     Ok(PositionalProofResult {
         key: target_key,
         value: target_value,
@@ -589,114 +615,130 @@ fn verify_positional_proof_internal(
     })
 }
 
-/// Recursively verifies the position within a tree and extracts the element
 #[cfg(feature = "list_mode")]
-#[allow(dead_code)]
+fn node_subtree_size(node: &Node) -> Option<u64> {
+    match node {
+        Node::KVWithSubtreeSize(_, _, size, _)
+        | Node::KVValueHashWithSubtreeSize(_, _, _, size, _)
+        | Node::KVValueHashFeatureTypeWithSubtreeSize(_, _, _, _, size, _)
+        | Node::KVRefValueHashWithSubtreeSize(_, _, _, size, _)
+        | Node::HashWithSubtreeSize(_, size, _)
+        | Node::KVHashWithSubtreeSize(_, size, _)
+        | Node::KVDigestWithSubtreeSize(_, _, size, _) => Some(*size),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "list_mode")]
+fn extract_key_value(node: &Node) -> Option<(Vec<u8>, Vec<u8>)> {
+    match node {
+        Node::KVWithSubtreeSize(key, value, _, _)
+        | Node::KVValueHashWithSubtreeSize(key, value, _, _, _)
+        | Node::KVValueHashFeatureTypeWithSubtreeSize(key, value, _, _, _, _)
+        | Node::KVRefValueHashWithSubtreeSize(key, value, _, _, _) => {
+            Some((key.clone(), value.clone()))
+        }
+        Node::KV(key, value)
+        | Node::KVValueHash(key, value, _)
+        | Node::KVValueHashFeatureType(key, value, _, _) => Some((key.clone(), value.clone())),
+        Node::KVRefValueHash(key, value, _) => Some((key.clone(), value.clone())),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "list_mode")]
+fn child_subtree_size(child: &Child) -> Result<u64, Error> {
+    node_subtree_size(&child.tree.node).ok_or_else(|| {
+        #[cfg(test)]
+        eprintln!(
+            "[VERIFY] Missing subtree size on child node: {:?}",
+            child.tree.node
+        );
+        Error::InvalidProofError("Child node missing subtree size metadata".to_string())
+    })
+}
+
+#[cfg(feature = "list_mode")]
 fn verify_position_in_tree(
     tree: &Tree,
     target_position: u64,
     accumulated_position: u64,
+    _grove_version: &GroveVersion,
 ) -> Result<(u64, Vec<u8>, Vec<u8>, u64), Error> {
-    // Extract subtree_size from the node
-    let subtree_size = match &tree.node {
-        Node::KVWithSubtreeSize(_, _, size)
-        | Node::HashWithSubtreeSize(_, size)
-        | Node::KVValueHashWithSubtreeSize(_, _, _, size) => *size,
-        _ => {
-            // For non-list nodes, calculate size from structure
-            1 + tree.child(true).map(|_| 1).unwrap_or(0) + tree.child(false).map(|_| 1).unwrap_or(0)
-        }
+    let subtree_size = node_subtree_size(&tree.node).ok_or_else(|| {
+        Error::InvalidProofError("Tree node missing subtree size metadata".to_string())
+    })?;
+
+    let left_size = match tree.left.as_ref() {
+        Some(left_child) => child_subtree_size(left_child)?,
+        None => 0,
     };
-    
-    // Get left subtree size
-    let left_size = if let Some(left_child) = tree.child(true) {
-        match &left_child.tree.node {
-            Node::KVWithSubtreeSize(_, _, size)
-            | Node::HashWithSubtreeSize(_, size)
-            | Node::KVValueHashWithSubtreeSize(_, _, _, size) => *size,
-            _ => 1,
-        }
-    } else {
-        0
-    };
-    
-    // Calculate position of current node
-    let current_position = accumulated_position + left_size;
-    
-    // Verify subtree_size consistency
-    let right_size = if let Some(right_child) = tree.child(false) {
-        match &right_child.tree.node {
-            Node::KVWithSubtreeSize(_, _, size)
-            | Node::HashWithSubtreeSize(_, size)
-            | Node::KVValueHashWithSubtreeSize(_, _, _, size) => *size,
-            _ => 1,
-        }
-    } else {
-        0
-    };
-    
-    let expected_subtree_size = left_size + 1 + right_size;
-    if subtree_size != expected_subtree_size {
+
+    if target_position >= accumulated_position + subtree_size {
         return Err(Error::InvalidProofError(format!(
-            "Subtree size mismatch: node claims {}, but children sum to {}",
-            subtree_size, expected_subtree_size
+            "Target position {} outside subtree bounds (size {})",
+            target_position, subtree_size
         )));
     }
-    
-    if current_position == target_position {
-        // Found the target node - extract key and value
-        #[cfg(test)]
-        eprintln!("[VERIFY] Found target at position {}. Node type: {:?}", target_position, tree.node);
-        
-        let (key, value) = match &tree.node {
-            Node::KVWithSubtreeSize(k, v, _) => (k.clone(), v.clone()),
-            Node::KVValueHashWithSubtreeSize(k, v, _, _) => (k.clone(), v.clone()),
-            _ => {
-                #[cfg(test)]
-                eprintln!("[VERIFY ERROR] Unexpected node type: {:?}", tree.node);
-                return Err(Error::InvalidProofError(
-                    "Target node does not contain key/value data".to_string(),
-                ));
-            }
-        };
-        
-        Ok((current_position, key, value, subtree_size))
-    } else if target_position < current_position {
-        // Target is in left subtree
-        if let Some(left) = tree.child(true) {
-            verify_position_in_tree(&left.tree, target_position, accumulated_position)
-        } else {
-            Err(Error::InvalidProofError(format!(
-                "Position {} should be in left subtree but no left child exists",
-                target_position
-            )))
+
+    let current_position = accumulated_position + left_size;
+
+    if target_position == current_position {
+        let (key, value) = extract_key_value(&tree.node).ok_or_else(|| {
+            Error::InvalidProofError("Target node does not carry full key/value".to_string())
+        })?;
+
+        return Ok((current_position, key, value, subtree_size));
+    }
+
+    if target_position < current_position {
+        let left_child = tree.left.as_ref().ok_or_else(|| {
+            Error::InvalidProofError("Left subtree missing while navigating proof".to_string())
+        })?;
+
+        return verify_position_in_tree(
+            &left_child.tree,
+            target_position,
+            accumulated_position,
+            _grove_version,
+        );
+    }
+
+    let right_child = tree.right.as_ref().ok_or_else(|| {
+        Error::InvalidProofError("Right subtree missing while navigating proof".to_string())
+    })?;
+
+    verify_position_in_tree(
+        &right_child.tree,
+        target_position,
+        current_position + 1,
+        _grove_version,
+    )
+}
+
+#[cfg(feature = "list_mode")]
+fn normalize_list_value(value: Vec<u8>) -> Vec<u8> {
+    match value.first() {
+        Some(flag) if *flag <= 1 => value,
+        Some(_) => {
+            let mut with_flag = Vec::with_capacity(value.len() + 1);
+            with_flag.push(0);
+            with_flag.extend(value);
+            with_flag
         }
-    } else {
-        // Target is in right subtree
-        if let Some(right) = tree.child(false) {
-            verify_position_in_tree(&right.tree, target_position, current_position + 1)
-        } else {
-            Err(Error::InvalidProofError(format!(
-                "Position {} should be in right subtree but no right child exists",
-                target_position
-            )))
-        }
+        None => vec![0],
     }
 }
 
 #[cfg(all(test, feature = "full", feature = "list_mode"))]
 mod tests {
     use super::*;
-    use crate::{
-        TreeType,
-        Merk,
-        MerkType,
-    };
-    use grovedb_storage::{
-        Storage, StorageBatch,
-        rocksdb_storage::{test_utils::TempStorage, PrefixedRocksDbTransactionContext},
-    };
+    use crate::{Merk, MerkType, TreeType};
     use grovedb_path::SubtreePath;
+    use grovedb_storage::{
+        rocksdb_storage::{test_utils::TempStorage, PrefixedRocksDbTransactionContext},
+        Storage, StorageBatch,
+    };
     use grovedb_version::version::GroveVersion;
 
     /// Helper function to create a list-mode Merk
@@ -704,15 +746,18 @@ mod tests {
         let storage = Box::leak(Box::new(TempStorage::new()));
         let batch = Box::leak(Box::new(StorageBatch::new()));
         let tx = Box::leak(Box::new(storage.start_transaction()));
-        
+
         let context = storage
             .get_transactional_storage_context(SubtreePath::empty(), Some(batch), tx)
             .unwrap();
-        
+
         Merk::open_empty(context, MerkType::StandaloneMerk, TreeType::ListTree)
     }
 
-    fn insert_values_at_positions(merk: &mut Merk<PrefixedRocksDbTransactionContext>, values: &[&[u8]]) {
+    fn insert_values_at_positions(
+        merk: &mut Merk<PrefixedRocksDbTransactionContext>,
+        values: &[&[u8]],
+    ) {
         let grove_version = GroveVersion::latest();
         for (i, value) in values.iter().enumerate() {
             merk.insert_at_position(i as u64, value.to_vec(), &grove_version)
@@ -742,7 +787,7 @@ mod tests {
     }
 
     // DISABLED: Value extraction fails for complex multi-leaf proofs
-    // 
+    //
     // Issue: The proof cryptographically verifies correctly (root hash matches), but extracting
     // the target value from complex proofs with multiple leaf nodes fails. The current heuristic
     // of "find the unique leaf node with size=1" doesn't work when the proof contains multiple
@@ -769,15 +814,27 @@ mod tests {
 
         // Test proof for each position
         for (pos, expected_value) in values.iter().enumerate() {
-            let proof_result = merk.prove_position(pos as u64, &grove_version).unwrap().unwrap();
-            
-            let result = verify_positional_proof(&proof_result.proof, pos as u64, root_hash, &grove_version)
+            let proof_result = merk
+                .prove_position(pos as u64, &grove_version)
                 .unwrap()
                 .unwrap();
 
+            let result =
+                verify_positional_proof(&proof_result.proof, pos as u64, root_hash, &grove_version)
+                    .unwrap()
+                    .unwrap();
+
             assert_eq!(result.position, pos as u64, "Position mismatch at {}", pos);
-            assert_eq!(result.value, *expected_value, "Value mismatch at position {}", pos);
-            assert_eq!(result.tree_size, 5, "Tree size mismatch at position {}", pos);
+            assert_eq!(
+                result.value, *expected_value,
+                "Value mismatch at position {}",
+                pos
+            );
+            assert_eq!(
+                result.tree_size, 5,
+                "Tree size mismatch at position {}",
+                pos
+            );
         }
     }
 
@@ -787,16 +844,16 @@ mod tests {
         let values = [b"first" as &[u8], b"second"];
         let mut merk = make_list_merk();
         insert_values_at_positions(&mut merk, &values);
-        
+
         let root_hash = merk.root_hash().unwrap();
         println!("\n=== Two Node Tree Test ===");
         println!("Expected root hash: {:?}", root_hash);
-        
+
         // Prove position 0
         println!("\n=== Proving Position 0 ===");
         let proof_result = merk.prove_position(0, &grove_version).unwrap().unwrap();
         println!("Proof size: {} bytes", proof_result.proof.len());
-        
+
         // Try to verify
         let result = verify_positional_proof(&proof_result.proof, 0, root_hash, &grove_version)
             .unwrap()
@@ -813,21 +870,26 @@ mod tests {
         let values = [b"a" as &[u8], b"b", b"c"];
         let mut merk = make_list_merk();
         insert_values_at_positions(&mut merk, &values);
-        
+
         let root_hash = merk.root_hash().unwrap();
         println!("\n=== Three Node Tree Test ===");
         println!("Root hash: {:?}", root_hash);
-        
+
         // Test each position
         for pos in 0..3 {
             println!("\n--- Testing position {} ---", pos);
             let proof_result = merk.prove_position(pos, &grove_version).unwrap().unwrap();
             println!("Proof size: {} bytes", proof_result.proof.len());
-            
-            let result = verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
-                .unwrap()
-                .unwrap();
-            println!("✓ Position {} verified: value={:?}", pos, std::str::from_utf8(&result.value).unwrap());
+
+            let result =
+                verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
+                    .unwrap()
+                    .unwrap();
+            println!(
+                "✓ Position {} verified: value={:?}",
+                pos,
+                std::str::from_utf8(&result.value).unwrap()
+            );
             assert_eq!(result.position, pos);
         }
     }
@@ -867,10 +929,13 @@ mod tests {
         // Try to prove position 3 (out of bounds for tree of size 3)
         let result = merk.prove_position(3, &grove_version).unwrap();
         assert!(result.is_err(), "Should fail for out of bounds position");
-        
+
         // Try to prove position 10 (way out of bounds)
         let result = merk.prove_position(10, &grove_version).unwrap();
-        assert!(result.is_err(), "Should fail for way out of bounds position");
+        assert!(
+            result.is_err(),
+            "Should fail for way out of bounds position"
+        );
     }
 
     #[test]
@@ -880,14 +945,21 @@ mod tests {
         insert_values_at_positions(&mut merk, &[b"v0", b"v1"]);
 
         let proof_result = merk.prove_position(0, &grove_version).unwrap().unwrap();
-        
+
         // Use a wrong root hash
         let wrong_hash = [0u8; 32];
-        let result = verify_positional_proof(&proof_result.proof, 0, wrong_hash, &grove_version).unwrap();
-        
-        assert!(result.is_err(), "Verification should fail with wrong root hash");
+        let result =
+            verify_positional_proof(&proof_result.proof, 0, wrong_hash, &grove_version).unwrap();
+
+        assert!(
+            result.is_err(),
+            "Verification should fail with wrong root hash"
+        );
         if let Err(Error::InvalidProofError(msg)) = result {
-            assert!(msg.contains("Root hash mismatch"), "Error should mention hash mismatch");
+            assert!(
+                msg.contains("Root hash mismatch"),
+                "Error should mention hash mismatch"
+            );
         } else {
             panic!("Expected InvalidProofError");
         }
@@ -909,8 +981,12 @@ mod tests {
         }
 
         // Verification should fail
-        let result = verify_positional_proof(&tampered_proof, 1, root_hash, &grove_version).unwrap();
-        assert!(result.is_err(), "Verification should fail with tampered proof");
+        let result =
+            verify_positional_proof(&tampered_proof, 1, root_hash, &grove_version).unwrap();
+        assert!(
+            result.is_err(),
+            "Verification should fail with tampered proof"
+        );
     }
 
     // DISABLED: Same issue as test_positional_proof_multiple_positions
@@ -924,16 +1000,14 @@ mod tests {
     #[ignore = "Value extraction fails in large trees - same issue as multiple_positions test"]
     fn test_positional_proof_large_tree() {
         let grove_version = GroveVersion::latest();
-        
+
         // Create a tree with 20 elements
         let values: Vec<Vec<u8>> = (0..20)
             .map(|i| format!("value{:02}", i).into_bytes())
             .collect();
-        
-        let values_refs: Vec<&[u8]> = values.iter()
-            .map(|v| v.as_slice())
-            .collect();
-        
+
+        let values_refs: Vec<&[u8]> = values.iter().map(|v| v.as_slice()).collect();
+
         let mut merk = make_list_merk();
         insert_values_at_positions(&mut merk, &values_refs);
         let root_hash = merk.root_hash().unwrap();
@@ -941,9 +1015,10 @@ mod tests {
         // Test a few positions in the larger tree
         for pos in [0, 5, 10, 15, 19] {
             let proof_result = merk.prove_position(pos, &grove_version).unwrap().unwrap();
-            let result = verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
-                .unwrap()
-                .unwrap();
+            let result =
+                verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
+                    .unwrap()
+                    .unwrap();
 
             let expected_value = format!("value{:02}", pos);
             assert_eq!(result.position, pos);
@@ -963,12 +1038,17 @@ mod tests {
         // For each position, verify that the proof validates subtree_size consistency
         for pos in 0..7 {
             let proof_result = merk.prove_position(pos, &grove_version).unwrap().unwrap();
-            
+
             // This should succeed - subtree sizes should be consistent
-            let result = verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
-                .unwrap();
-            
-            assert!(result.is_ok(), "Proof verification failed for position {}", pos);
+            let result =
+                verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
+                    .unwrap();
+
+            assert!(
+                result.is_ok(),
+                "Proof verification failed for position {}",
+                pos
+            );
             assert_eq!(result.unwrap().tree_size, 7);
         }
     }
@@ -996,13 +1076,20 @@ mod tests {
 
         // Generate proof for position 1
         let proof_result = merk.prove_position(1, &grove_version).unwrap().unwrap();
-        
+
         // Try to verify it as position 0 (wrong claim)
-        let result = verify_positional_proof(&proof_result.proof, 0, root_hash, &grove_version).unwrap();
-        
-        assert!(result.is_err(), "Should fail when position claim doesn't match proof");
+        let result =
+            verify_positional_proof(&proof_result.proof, 0, root_hash, &grove_version).unwrap();
+
+        assert!(
+            result.is_err(),
+            "Should fail when position claim doesn't match proof"
+        );
         if let Err(Error::InvalidProofError(msg)) = result {
-            assert!(msg.contains("Position mismatch"), "Error should mention position mismatch");
+            assert!(
+                msg.contains("Position mismatch"),
+                "Error should mention position mismatch"
+            );
         } else {
             panic!("Expected InvalidProofError");
         }
@@ -1030,9 +1117,10 @@ mod tests {
         // Each position should still be provable correctly
         for pos in 0..4 {
             let proof_result = merk.prove_position(pos, &grove_version).unwrap().unwrap();
-            let result = verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
-                .unwrap()
-                .unwrap();
+            let result =
+                verify_positional_proof(&proof_result.proof, pos, root_hash, &grove_version)
+                    .unwrap()
+                    .unwrap();
 
             assert_eq!(result.position, pos);
             assert_eq!(result.value, b"same");

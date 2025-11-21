@@ -129,9 +129,11 @@ o: InsertAfterKeyWithKey { target: uuid4, key: uuid5, value: 'o' }
 // Delete by UUID (reference-based!)
 Delete { uuid: uuid3 }
 
-// Server marks as tombstone:
-// 1. Delete at position
-// 2. Re-insert with deleted_flag=1
+// Server marks as tombstone in-place
+ListOp::UpdateValueByKey {
+   key: uuid3,
+   value: encode_value('l', true),
+}
 ```
 
 ### Test 5: Multiple Clients (Concurrent Editing)

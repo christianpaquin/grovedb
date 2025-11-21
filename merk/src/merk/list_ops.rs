@@ -114,10 +114,7 @@ pub enum ListOp {
     ///
     /// # Returns
     /// The generated key for the inserted element (via batch result)
-    InsertAtPosition {
-        position: u64,
-        value: Vec<u8>,
-    },
+    InsertAtPosition { position: u64, value: Vec<u8> },
 
     /// Insert a value at the specified position with a client-provided key.
     /// Enables optimistic local updates without waiting for server response.
@@ -142,9 +139,7 @@ pub enum ListOp {
     ///
     /// # Returns
     /// The deleted (key, value) pair (via batch result)
-    DeleteAtPosition {
-        position: u64,
-    },
+    DeleteAtPosition { position: u64 },
 
     /// Insert a value immediately after the element with the given key.
     /// Generates a random UUID for the new element.
@@ -161,12 +156,9 @@ pub enum ListOp {
     /// This operation requires computing the position of target_key first,
     /// which involves traversing the parent chain. In batch context, we can
     /// optimize by caching position lookups.
-    /// 
+    ///
     /// Internally, this generates a UUID and calls InsertAfterKeyWithKey.
-    InsertAfterKey {
-        target_key: Vec<u8>,
-        value: Vec<u8>,
-    },
+    InsertAfterKey { target_key: Vec<u8>, value: Vec<u8> },
 
     /// Insert a value with a client-provided key immediately after the element with the given key.
     ///
@@ -184,7 +176,7 @@ pub enum ListOp {
     /// // Client types 'i' after 'H'
     /// let uuid_i = Uuid::new_v4();
     /// client.show_char_optimistically(uuid_i, 'i'); // Instant feedback!
-    /// 
+    ///
     /// let op = ListOp::InsertAfterKeyWithKey {
     ///     target_key: uuid_h,
     ///     key: uuid_i.as_bytes().to_vec(),
@@ -222,10 +214,7 @@ pub enum ListOp {
     ///
     /// # Note
     /// Returns an error if the key does not exist in the tree.
-    UpdateValueByKey {
-        key: Vec<u8>,
-        value: Vec<u8>,
-    },
+    UpdateValueByKey { key: Vec<u8>, value: Vec<u8> },
 }
 
 #[cfg(feature = "full")]
@@ -239,7 +228,7 @@ pub struct ListBatchResult {
     /// For InsertAtPositionWithKey, this contains the provided key.
     /// For DeleteAtPosition, this contains the deleted key.
     pub keys: Vec<Vec<u8>>,
-    
+
     /// Values for operations that return them (e.g., DeleteAtPosition).
     /// For Insert operations, this is empty.
     pub values: Vec<Vec<u8>>,
@@ -323,7 +312,7 @@ where
                 // Phase 5C: Check if we need to recursively load Link::Reference children
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
                     || tree.link(false).map_or(false, |l| l.is_reference());
-                
+
                 if needs_full_load {
                     // Recursively load the full tree from storage
                     let loaded_tree = cost_return_on_error!(
@@ -342,9 +331,11 @@ where
                 // Tree not loaded - check if root exists in storage
                 let root_key_opt = cost_return_on_error!(
                     &mut cost,
-                    self.storage.get_root(ROOT_KEY_KEY).map_err(Error::StorageError)
+                    self.storage
+                        .get_root(ROOT_KEY_KEY)
+                        .map_err(Error::StorageError)
                 );
-                
+
                 if let Some(root_key) = root_key_opt {
                     // Root exists - load it
                     let root_tree = cost_return_on_error!(
@@ -356,7 +347,7 @@ where
                             grove_version
                         )
                     );
-                    
+
                     if let Some(root) = root_tree {
                         // Phase 5C: Recursively load the full tree from storage
                         // This converts all Link::Reference children to Link::Loaded
@@ -367,8 +358,10 @@ where
                         let old_key = loaded_tree.key().to_vec();
                         (Some(old_key), loaded_tree)
                     } else {
-                        return Err(Error::InternalError("Root key exists but root node not found"))
-                            .wrap_with_cost(cost);
+                        return Err(Error::InternalError(
+                            "Root key exists but root node not found",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                 } else {
                     // Empty tree case - position must be 0
@@ -378,32 +371,32 @@ where
                         ))
                         .wrap_with_cost(cost);
                     }
-                    
+
                     // Create first node
                     let mut node = TreeNode::new_list_node(value).unwrap_add_cost(&mut cost);
-                    
+
                     // For standalone Merk, disable parent pointers (they're enabled by default for list mode)
                     // This ensures correct hashing for positional proofs
                     #[cfg(feature = "list_mode")]
                     if self.merk_type == MerkType::StandaloneMerk {
                         node.disable_parent_pointers_recursive();
                     }
-                    
+
                     let generated_key = node.key().to_vec();
                     self.tree.set(Some(node));
 
                     // Build key_updates for empty tree insert
                     let mut new_keys = BTreeSet::new();
                     new_keys.insert(generated_key.clone());
-                    let key_updates = KeyUpdates::new(
-                        new_keys,
-                        BTreeSet::default(),
-                        LinkedList::default(),
-                        None,
-                    );
+                    let key_updates =
+                        KeyUpdates::new(new_keys, BTreeSet::default(), LinkedList::default(), None);
 
                     // Commit to storage
-                    let empty_aux: &[(Vec<u8>, crate::tree::Op, Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>)] = &[];
+                    let empty_aux: &[(
+                        Vec<u8>,
+                        crate::tree::Op,
+                        Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>,
+                    )] = &[];
                     cost_return_on_error!(
                         &mut cost,
                         self.commit(
@@ -413,6 +406,8 @@ where
                             &|_, _| Ok(0) // No specialized costs for list mode
                         )
                     );
+                    #[cfg(feature = "list_mode")]
+                    self.invalidate_key_cache();
 
                     return Ok(generated_key).wrap_with_cost(cost);
                 }
@@ -420,19 +415,21 @@ where
         };
 
         // Perform positional insert on existing tree
-        let insert_result = tree.insert_at_position(position, value).unwrap_add_cost(&mut cost);
+        let insert_result = tree
+            .insert_at_position(position, value)
+            .unwrap_add_cost(&mut cost);
         let (mut new_tree, generated_key) = match insert_result {
             Ok(result) => result,
             Err(e) => return Err(e).wrap_with_cost(cost),
         };
-        
+
         // For standalone Merk, disable parent pointers (they're enabled by default for list mode)
         // This ensures correct hashing for positional proofs
         #[cfg(feature = "list_mode")]
         if self.merk_type == MerkType::StandaloneMerk {
             new_tree.disable_parent_pointers_recursive();
         }
-        
+
         let new_root_key = new_tree.key().to_vec();
 
         // Set new root
@@ -460,7 +457,11 @@ where
         );
 
         // Commit to storage
-        let empty_aux: &[(Vec<u8>, crate::tree::Op, Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>)] = &[];
+        let empty_aux: &[(
+            Vec<u8>,
+            crate::tree::Op,
+            Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>,
+        )] = &[];
         cost_return_on_error!(
             &mut cost,
             self.commit(
@@ -470,6 +471,8 @@ where
                 &|_, _| Ok(0) // No specialized costs for list mode
             )
         );
+        #[cfg(feature = "list_mode")]
+        self.invalidate_key_cache();
 
         Ok(generated_key).wrap_with_cost(cost)
     }
@@ -526,7 +529,7 @@ where
                 // Phase 5C: Check if we need to recursively load Link::Reference children
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
                     || tree.link(false).map_or(false, |l| l.is_reference());
-                
+
                 if needs_full_load {
                     // Recursively load the full tree from storage
                     let loaded_tree = cost_return_on_error!(
@@ -545,9 +548,11 @@ where
                 // Tree not loaded - check if root exists in storage
                 let root_key_opt = cost_return_on_error!(
                     &mut cost,
-                    self.storage.get_root(ROOT_KEY_KEY).map_err(Error::StorageError)
+                    self.storage
+                        .get_root(ROOT_KEY_KEY)
+                        .map_err(Error::StorageError)
                 );
-                
+
                 if let Some(root_key) = root_key_opt {
                     // Root exists - load it
                     let root_tree = cost_return_on_error!(
@@ -559,7 +564,7 @@ where
                             grove_version
                         )
                     );
-                    
+
                     if let Some(root) = root_tree {
                         // Phase 5C: Recursively load the full tree from storage
                         let loaded_tree = cost_return_on_error!(
@@ -569,8 +574,10 @@ where
                         let old_key = loaded_tree.key().to_vec();
                         (old_key, loaded_tree)
                     } else {
-                        return Err(Error::InternalError("Root key exists but root node not found"))
-                            .wrap_with_cost(cost);
+                        return Err(Error::InternalError(
+                            "Root key exists but root node not found",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                 } else {
                     return Err(Error::InternalError("cannot delete from empty tree"))
@@ -596,7 +603,7 @@ where
         // 1. deleted_keys: The key that was deleted
         // 2. updated_root_key_from: If root changed due to tree rebalancing
         let mut deleted_keys = LinkedList::new();
-        
+
         // TODO: Calculate proper deletion costs for resource accounting
         // Currently using default (zeros) which means:
         //   - Deletion works correctly
@@ -605,7 +612,8 @@ where
         //   - Key cost: HASH_LENGTH + key_len + required_space(prefixed_key_len)
         //   - Value cost: actual encoded size including list_mode overhead
         // Note: Insert costs are now correctly calculated (including list_mode overhead)
-        let deletion_cost = grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost::default();
+        let deletion_cost =
+            grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost::default();
         deleted_keys.push_back((deleted_key.clone(), deletion_cost));
 
         let updated_root_key_from = if old_root_key != new_root_key {
@@ -622,7 +630,11 @@ where
         );
 
         // Commit to storage
-        let empty_aux: &[(Vec<u8>, crate::tree::Op, Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>)] = &[];
+        let empty_aux: &[(
+            Vec<u8>,
+            crate::tree::Op,
+            Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>,
+        )] = &[];
         cost_return_on_error!(
             &mut cost,
             self.commit(
@@ -632,6 +644,8 @@ where
                 &|_, _| Ok(0) // No specialized costs for list mode
             )
         );
+        #[cfg(feature = "list_mode")]
+        self.invalidate_key_cache();
 
         Ok((deleted_key, deleted_value)).wrap_with_cost(cost)
     }
@@ -707,8 +721,10 @@ where
         // 3. Use unsafe with careful lifetimes
 
         // Stub implementation for now
-        Err(Error::NotSupported("insert_after_key storage-backed fetch not yet implemented".to_string()))
-            .wrap_with_cost(Default::default())
+        Err(Error::NotSupported(
+            "insert_after_key storage-backed fetch not yet implemented".to_string(),
+        ))
+        .wrap_with_cost(Default::default())
     }
 
     /// Apply a batch of list operations atomically.
@@ -782,7 +798,7 @@ where
     /// 1. Load tree once (with full materialization if lazy-loaded)
     /// 2. For each operation:
     ///    - Apply operation to in-memory tree
-    ///    - For InsertAfterKey: Build node map for fetch closure
+    ///    - For InsertAfterKey: Use subtree metadata to derive positions
     ///    - Track generated/deleted keys
     ///    - Accumulate costs
     /// 3. Recompute subtree_size once at the end
@@ -798,8 +814,8 @@ where
     /// - Concurrent insertions are conflict-free
     /// - Natural for distributed collaboration
     ///
-    /// In batch context, InsertAfterKey operations build an in-memory node map
-    /// to satisfy the fetch closure requirement without storage round-trips.
+    /// In batch context, InsertAfterKey operations leverage subtree sizes to
+    /// compute positions directly, avoiding extra fetches or materialization.
     ///
     /// # Current Status
     ///
@@ -844,7 +860,7 @@ where
                 // Tree is loaded, check if it needs full materialization
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
                     || tree.link(false).map_or(false, |l| l.is_reference());
-                
+
                 if needs_full_load {
                     // Phase 5C: Recursively load the full tree from storage
                     cost_return_on_error!(
@@ -859,9 +875,11 @@ where
                 // Tree not loaded - check if root exists in storage
                 let root_key_opt = cost_return_on_error!(
                     &mut cost,
-                    self.storage.get_root(ROOT_KEY_KEY).map_err(Error::StorageError)
+                    self.storage
+                        .get_root(ROOT_KEY_KEY)
+                        .map_err(Error::StorageError)
                 );
-                
+
                 if let Some(root_key) = root_key_opt {
                     // Load root and then full tree
                     let root_tree = cost_return_on_error!(
@@ -873,7 +891,7 @@ where
                             grove_version
                         )
                     );
-                    
+
                     if let Some(root) = root_tree {
                         // Recursively load full tree
                         cost_return_on_error!(
@@ -881,19 +899,21 @@ where
                             super::load_tree_recursively(root, &self.storage, grove_version)
                         )
                     } else {
-                        return Err(Error::InternalError("Root key exists but root node not found"))
-                            .wrap_with_cost(cost);
+                        return Err(Error::InternalError(
+                            "Root key exists but root node not found",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                 } else {
                     // Empty tree - first operation must be insert at position 0
-                    if let Some(ListOp::InsertAtPosition { position: 0, .. }) 
-                        | Some(ListOp::InsertAtPositionWithKey { position: 0, .. }) = batch.first() 
+                    if let Some(ListOp::InsertAtPosition { position: 0, .. })
+                    | Some(ListOp::InsertAtPositionWithKey { position: 0, .. }) = batch.first()
                     {
                         // Will be handled in the loop
                         return self.apply_list_batch_to_empty_tree(batch, grove_version);
                     } else {
                         return Err(Error::InternalError(
-                            "first operation on empty tree must be insert at position 0"
+                            "first operation on empty tree must be insert at position 0",
                         ))
                         .wrap_with_cost(cost);
                     }
@@ -901,17 +921,14 @@ where
             }
         };
 
-        // Build node index for fast lookups during InsertAfterKey operations
-        self.tree.set(Some(tree));
-        self.rebuild_node_index();
-        let mut tree = self.tree.take().unwrap(); // Tree must exist after rebuild
+        let mut tree = tree;
 
         // Phase 1: Validate all operations before applying any
         // This ensures atomicity - either all operations succeed or none do
         // We track the cumulative effect of operations to validate subsequent ones
         let mut current_size = tree.subtree_size();
         let mut keys_in_tree = std::collections::HashSet::new();
-        
+
         // Collect existing keys
         fn collect_keys(node: &TreeNode, keys: &mut std::collections::HashSet<Vec<u8>>) {
             keys.insert(node.key().to_vec());
@@ -923,7 +940,7 @@ where
             }
         }
         collect_keys(&tree, &mut keys_in_tree);
-        
+
         for op in batch {
             match op {
                 ListOp::InsertAtPosition { position, .. } => {
@@ -932,8 +949,9 @@ where
                         // Restore tree before returning error
                         self.tree.set(Some(tree));
                         return Err(Error::InvalidInputError(
-                            "Insert position out of bounds in batch operation"
-                        )).wrap_with_cost(cost);
+                            "Insert position out of bounds in batch operation",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                     current_size += 1; // Insert increases size
                 }
@@ -942,8 +960,9 @@ where
                         // Restore tree before returning error
                         self.tree.set(Some(tree));
                         return Err(Error::InvalidInputError(
-                            "Insert position out of bounds in batch operation"
-                        )).wrap_with_cost(cost);
+                            "Insert position out of bounds in batch operation",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                     keys_in_tree.insert(key.clone());
                     current_size += 1;
@@ -954,8 +973,9 @@ where
                         // Restore tree before returning error
                         self.tree.set(Some(tree));
                         return Err(Error::InvalidInputError(
-                            "Delete position out of bounds in batch operation"
-                        )).wrap_with_cost(cost);
+                            "Delete position out of bounds in batch operation",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                     current_size -= 1; // Delete decreases size
                 }
@@ -965,19 +985,23 @@ where
                         // Restore tree before returning error
                         self.tree.set(Some(tree));
                         return Err(Error::InvalidInputError(
-                            "InsertAfterKey target_key not found in tree"
-                        )).wrap_with_cost(cost);
+                            "InsertAfterKey target_key not found in tree",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                     current_size += 1; // Insert increases size
                 }
-                ListOp::InsertAfterKeyWithKey { target_key, key, .. } => {
+                ListOp::InsertAfterKeyWithKey {
+                    target_key, key, ..
+                } => {
                     // Verify target_key exists in tree (accounting for previous operations)
                     if !keys_in_tree.contains(target_key) {
                         // Restore tree before returning error
                         self.tree.set(Some(tree));
                         return Err(Error::InvalidInputError(
-                            "InsertAfterKeyWithKey target_key not found in tree"
-                        )).wrap_with_cost(cost);
+                            "InsertAfterKeyWithKey target_key not found in tree",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                     keys_in_tree.insert(key.clone());
                     current_size += 1; // Insert increases size
@@ -988,8 +1012,9 @@ where
                         // Restore tree before returning error
                         self.tree.set(Some(tree));
                         return Err(Error::InvalidInputError(
-                            "UpdateValueByKey key not found in tree"
-                        )).wrap_with_cost(cost);
+                            "UpdateValueByKey key not found in tree",
+                        ))
+                        .wrap_with_cost(cost);
                     }
                     // Update doesn't change size
                 }
@@ -1005,9 +1030,10 @@ where
         for op in batch {
             match op {
                 ListOp::InsertAtPosition { position, value } => {
-                    let insert_result = tree.insert_at_position(*position, value.clone())
+                    let insert_result = tree
+                        .insert_at_position(*position, value.clone())
                         .unwrap_add_cost(&mut cost);
-                    
+
                     let (new_tree, generated_key) = match insert_result {
                         Ok(result) => result,
                         Err(e) => {
@@ -1015,58 +1041,57 @@ where
                             return Err(e).wrap_with_cost(cost);
                         }
                     };
-                    
+
                     result_keys.push(generated_key.clone());
                     all_new_keys.insert(generated_key);
                     tree = new_tree;
                 }
-                
-                ListOp::InsertAtPositionWithKey { position, key, value } => {
-                    let insert_result = tree.insert_at_position_with_key(
-                        *position,
-                        key.clone(),
-                        value.clone()
-                    ).unwrap_add_cost(&mut cost);
-                    
+
+                ListOp::InsertAtPositionWithKey {
+                    position,
+                    key,
+                    value,
+                } => {
+                    let insert_result = tree
+                        .insert_at_position_with_key(*position, key.clone(), value.clone())
+                        .unwrap_add_cost(&mut cost);
+
                     let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
                         Err(e) => {
                             return Err(e).wrap_with_cost(cost);
                         }
                     };
-                    
+
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
                     tree = new_tree;
                 }
-                
+
                 ListOp::DeleteAtPosition { position } => {
-                    let delete_result = tree.delete_at_position(*position)
+                    let delete_result = tree
+                        .delete_at_position(*position)
                         .unwrap_add_cost(&mut cost);
-                    
+
                     let (new_tree, deleted_key, deleted_value) = match delete_result {
                         Ok(result) => result,
                         Err(e) => {
                             return Err(e).wrap_with_cost(cost);
                         }
                     };
-                    
+
                     result_keys.push(deleted_key.clone());
                     result_values.push(deleted_value);
-                    
-                    let deletion_cost = grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost::default();
+
+                    let deletion_cost =
+                        grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost::default();
                     all_deleted_keys.push_back((deleted_key, deletion_cost));
                     tree = new_tree;
                 }
-                
+
                 ListOp::InsertAfterKey { target_key, value } => {
-                    // InsertAfterKey generates a server-side UUID and delegates to InsertAfterKeyWithKey
-                    let generated_key = uuid::Uuid::new_v4().as_bytes().to_vec();
-                    
-                    // Use node index for node fetch
-                    let temp_tree = tree;
-                    let fetch = |k: &[u8]| self.get_node_from_index(k);
-                    let insert_result = temp_tree.insert_after_key_with_key(target_key, generated_key.clone(), value.clone(), fetch)
+                    let insert_result = tree
+                        .insert_after_key(target_key, value.clone())
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
@@ -1074,72 +1099,48 @@ where
                     };
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
-                    
-                    // Update index with new tree structure
                     tree = new_tree;
-                    self.tree.set(Some(tree));
-                    self.rebuild_node_index();
-                    tree = self.tree.take().unwrap();
                 }
-                
-                ListOp::InsertAfterKeyWithKey { target_key, key, value } => {
+
+                ListOp::InsertAfterKeyWithKey {
+                    target_key,
+                    key,
+                    value,
+                } => {
                     // Similar to InsertAfterKey but with client-provided key
                     // This enables optimistic local updates with zero latency
-                    let temp_tree = tree;
-                    
-                    // Use node index for node fetch
-                    let fetch = |k: &[u8]| self.get_node_from_index(k);
-                    let insert_result = temp_tree.insert_after_key_with_key(
-                        target_key,
-                        key.clone(),
-                        value.clone(),
-                        fetch
-                    ).unwrap_add_cost(&mut cost);
-                    
+                    let insert_result = tree
+                        .insert_after_key_with_key(target_key, key.clone(), value.clone())
+                        .unwrap_add_cost(&mut cost);
+
                     let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
                         Err(e) => {
                             return Err(e).wrap_with_cost(cost);
                         }
                     };
-                    
+
                     result_keys.push(returned_key.clone());
                     all_new_keys.insert(returned_key);
-                    
-                    // Update index with new tree structure
                     tree = new_tree;
-                    self.tree.set(Some(tree));
-                    self.rebuild_node_index();
-                    tree = self.tree.take().unwrap();
                 }
-                
+
                 ListOp::UpdateValueByKey { key, value } => {
                     // Update value in-place without structural changes
-                    let temp_tree = tree;
-                    
-                    // Use node index for node fetch
-                    let fetch = |k: &[u8]| self.get_node_from_index(k);
-                    let update_result = temp_tree.update_value_by_key(
-                        key,
-                        value.clone(),
-                        fetch
-                    ).unwrap_add_cost(&mut cost);
-                    
+                    let update_result = tree
+                        .update_value_by_key(key, value.clone())
+                        .unwrap_add_cost(&mut cost);
+
                     let (new_tree, returned_key) = match update_result {
                         Ok(result) => result,
                         Err(e) => {
                             return Err(e).wrap_with_cost(cost);
                         }
                     };
-                    
+
                     result_keys.push(returned_key.clone());
                     // Note: Update doesn't add to all_new_keys since it's not a new insertion
-                    
-                    // Update index with new tree structure
                     tree = new_tree;
-                    self.tree.set(Some(tree));
-                    self.rebuild_node_index();
-                    tree = self.tree.take().unwrap();
                 }
             }
         }
@@ -1166,7 +1167,6 @@ where
 
         // Set new tree
         self.tree.set(Some(tree));
-
         // Build consolidated key_updates
         let key_updates = KeyUpdates::new(
             all_new_keys,
@@ -1176,7 +1176,11 @@ where
         );
 
         // Single atomic commit
-        let empty_aux: &[(Vec<u8>, crate::tree::Op, Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>)] = &[];
+        let empty_aux: &[(
+            Vec<u8>,
+            crate::tree::Op,
+            Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>,
+        )] = &[];
         cost_return_on_error!(
             &mut cost,
             self.commit(
@@ -1186,10 +1190,8 @@ where
                 &|_, _| Ok(0) // No specialized costs for list mode
             )
         );
-
-        // Rebuild index after commit to reflect final tree state
-        self.rebuild_node_index();
-
+        #[cfg(feature = "list_mode")]
+        self.invalidate_key_cache();
         Ok(ListBatchResult {
             keys: result_keys,
             values: result_values,
@@ -1205,7 +1207,7 @@ where
         _grove_version: &GroveVersion,
     ) -> CostResult<ListBatchResult, Error> {
         let mut cost = OperationCost::default();
-        
+
         // Create first node from first operation
         let (mut tree, first_key) = match &batch[0] {
             ListOp::InsertAtPosition { value, .. } => {
@@ -1220,7 +1222,7 @@ where
             }
             _ => {
                 return Err(Error::InternalError(
-                    "first operation on empty tree must be insert"
+                    "first operation on empty tree must be insert",
                 ))
                 .wrap_with_cost(cost);
             }
@@ -1235,7 +1237,8 @@ where
         for op in &batch[1..] {
             match op {
                 ListOp::InsertAtPosition { position, value } => {
-                    let insert_result = tree.insert_at_position(*position, value.clone())
+                    let insert_result = tree
+                        .insert_at_position(*position, value.clone())
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, generated_key) = match insert_result {
                         Ok(result) => result,
@@ -1245,8 +1248,13 @@ where
                     all_new_keys.insert(generated_key);
                     tree = new_tree;
                 }
-                ListOp::InsertAtPositionWithKey { position, key, value } => {
-                    let insert_result = tree.insert_at_position_with_key(*position, key.clone(), value.clone())
+                ListOp::InsertAtPositionWithKey {
+                    position,
+                    key,
+                    value,
+                } => {
+                    let insert_result = tree
+                        .insert_at_position_with_key(*position, key.clone(), value.clone())
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
@@ -1257,7 +1265,8 @@ where
                     tree = new_tree;
                 }
                 ListOp::DeleteAtPosition { position } => {
-                    let delete_result = tree.delete_at_position(*position)
+                    let delete_result = tree
+                        .delete_at_position(*position)
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, deleted_key, deleted_value) = match delete_result {
                         Ok(result) => result,
@@ -1268,25 +1277,8 @@ where
                     tree = new_tree;
                 }
                 ListOp::InsertAfterKey { target_key, value } => {
-                    // InsertAfterKey generates a server-side UUID and delegates to InsertAfterKeyWithKey
-                    let generated_key = uuid::Uuid::new_v4().as_bytes().to_vec();
-                    
-                    // Build node map for fetch closure
-                    let temp_tree = tree;
-                    let mut node_map = std::collections::HashMap::new();
-                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
-                        map.insert(node.key().to_vec(), node.clone());
-                        if let Some(left) = node.child(true) {
-                            collect_nodes(left, map);
-                        }
-                        if let Some(right) = node.child(false) {
-                            collect_nodes(right, map);
-                        }
-                    }
-                    collect_nodes(&temp_tree, &mut node_map);
-                    
-                    let fetch = |k: &[u8]| node_map.get(k).cloned();
-                    let insert_result = temp_tree.insert_after_key_with_key(target_key, generated_key.clone(), value.clone(), fetch)
+                    let insert_result = tree
+                        .insert_after_key(target_key, value.clone())
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
@@ -1296,23 +1288,13 @@ where
                     all_new_keys.insert(returned_key);
                     tree = new_tree;
                 }
-                ListOp::InsertAfterKeyWithKey { target_key, key, value } => {
-                    // Build node map for fetch closure
-                    let temp_tree = tree;
-                    let mut node_map = std::collections::HashMap::new();
-                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
-                        map.insert(node.key().to_vec(), node.clone());
-                        if let Some(left) = node.child(true) {
-                            collect_nodes(left, map);
-                        }
-                        if let Some(right) = node.child(false) {
-                            collect_nodes(right, map);
-                        }
-                    }
-                    collect_nodes(&temp_tree, &mut node_map);
-                    
-                    let fetch = |k: &[u8]| node_map.get(k).cloned();
-                    let insert_result = temp_tree.insert_after_key_with_key(target_key, key.clone(), value.clone(), fetch)
+                ListOp::InsertAfterKeyWithKey {
+                    target_key,
+                    key,
+                    value,
+                } => {
+                    let insert_result = tree
+                        .insert_after_key_with_key(target_key, key.clone(), value.clone())
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, returned_key) = match insert_result {
                         Ok(result) => result,
@@ -1323,24 +1305,8 @@ where
                     tree = new_tree;
                 }
                 ListOp::UpdateValueByKey { key, value } => {
-                    // Update value in-place without structural changes
-                    let temp_tree = tree;
-                    
-                    // Build node map for fetch closure
-                    let mut node_map = std::collections::HashMap::new();
-                    fn collect_nodes(node: &TreeNode, map: &mut std::collections::HashMap<Vec<u8>, TreeNode>) {
-                        map.insert(node.key().to_vec(), node.clone());
-                        if let Some(left) = node.child(true) {
-                            collect_nodes(left, map);
-                        }
-                        if let Some(right) = node.child(false) {
-                            collect_nodes(right, map);
-                        }
-                    }
-                    collect_nodes(&temp_tree, &mut node_map);
-                    
-                    let fetch = |k: &[u8]| node_map.get(k).cloned();
-                    let update_result = temp_tree.update_value_by_key(key, value.clone(), fetch)
+                    let update_result = tree
+                        .update_value_by_key(key, value.clone())
                         .unwrap_add_cost(&mut cost);
                     let (new_tree, returned_key) = match update_result {
                         Ok(result) => result,
@@ -1355,7 +1321,7 @@ where
 
         // Set tree and commit
         self.tree.set(Some(tree));
-        
+
         let key_updates = KeyUpdates::new(
             all_new_keys,
             BTreeSet::default(),
@@ -1363,20 +1329,17 @@ where
             None,
         );
 
-        let empty_aux: &[(Vec<u8>, crate::tree::Op, Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>)] = &[];
+        let empty_aux: &[(
+            Vec<u8>,
+            crate::tree::Op,
+            Option<grovedb_costs::storage_cost::key_value_cost::KeyValueStorageCost>,
+        )] = &[];
         cost_return_on_error!(
             &mut cost,
-            self.commit(
-                key_updates,
-                empty_aux,
-                None,
-                &|_, _| Ok(0)
-            )
+            self.commit(key_updates, empty_aux, None, &|_, _| Ok(0))
         );
-
-        // Rebuild index after commit to reflect final tree state
-        self.rebuild_node_index();
-
+        #[cfg(feature = "list_mode")]
+        self.invalidate_key_cache();
         Ok(ListBatchResult {
             keys: result_keys,
             values: result_values,
@@ -1395,15 +1358,16 @@ mod tests {
     use crate::{Merk, MerkType, TreeType};
 
     /// Helper to create a test Merk with list-mode enabled
-    fn make_list_merk() -> Merk<grovedb_storage::rocksdb_storage::PrefixedRocksDbTransactionContext<'static>> {
+    fn make_list_merk(
+    ) -> Merk<grovedb_storage::rocksdb_storage::PrefixedRocksDbTransactionContext<'static>> {
         let storage = Box::leak(Box::new(TempStorage::new()));
         let batch = Box::leak(Box::new(StorageBatch::new()));
         let tx = Box::leak(Box::new(storage.start_transaction()));
-        
+
         let context = storage
             .get_transactional_storage_context(SubtreePath::empty(), Some(batch), tx)
             .unwrap();
-        
+
         Merk::open_empty(context, MerkType::StandaloneMerk, TreeType::ListTree)
     }
 
@@ -1414,7 +1378,7 @@ mod tests {
     {
         merk.use_tree(|maybe_tree| {
             let mut values = Vec::new();
-            
+
             if let Some(tree) = maybe_tree {
                 fn collect_values(node: &TreeNode, values: &mut Vec<Vec<u8>>) {
                     if let Some(left) = node.child(true) {
@@ -1427,7 +1391,7 @@ mod tests {
                 }
                 collect_values(tree, &mut values);
             }
-            
+
             values
         })
     }
@@ -1472,7 +1436,10 @@ mod tests {
 
         // Verify tree has 5 nodes
         let values = collect_merk_values(&merk, &grove_version);
-        assert_eq!(values, vec![vec![b'H'], vec![b'e'], vec![b'l'], vec![b'l'], vec![b'o']]);
+        assert_eq!(
+            values,
+            vec![vec![b'H'], vec![b'e'], vec![b'l'], vec![b'l'], vec![b'o']]
+        );
     }
 
     #[test]
@@ -1511,7 +1478,7 @@ mod tests {
 
         // Verify keys are returned in order
         assert_eq!(result.keys, vec![key1, key2, key3]);
-        
+
         // Verify values
         let values = collect_merk_values(&merk, &grove_version);
         assert_eq!(values, vec![vec![b'A'], vec![b'B'], vec![b'C']]);
@@ -1525,11 +1492,26 @@ mod tests {
 
         // First batch: Insert 5 elements
         let batch1 = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![1] },
-            ListOp::InsertAtPosition { position: 1, value: vec![2] },
-            ListOp::InsertAtPosition { position: 2, value: vec![3] },
-            ListOp::InsertAtPosition { position: 3, value: vec![4] },
-            ListOp::InsertAtPosition { position: 4, value: vec![5] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![1],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![2],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![3],
+            },
+            ListOp::InsertAtPosition {
+                position: 3,
+                value: vec![4],
+            },
+            ListOp::InsertAtPosition {
+                position: 4,
+                value: vec![5],
+            },
         ];
 
         merk.apply_list_batch(&batch1, &grove_version)
@@ -1539,8 +1521,14 @@ mod tests {
         // Second batch: Delete middle element and insert new ones
         let batch2 = vec![
             ListOp::DeleteAtPosition { position: 2 }, // Delete [3]
-            ListOp::InsertAtPosition { position: 2, value: vec![99] }, // Insert [99]
-            ListOp::InsertAtPosition { position: 5, value: vec![100] }, // Insert at end
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![99],
+            }, // Insert [99]
+            ListOp::InsertAtPosition {
+                position: 5,
+                value: vec![100],
+            }, // Insert at end
         ];
 
         let result = merk
@@ -1597,7 +1585,10 @@ mod tests {
         // Verify 5 deletions
         assert_eq!(result.keys.len(), 5);
         assert_eq!(result.values.len(), 5);
-        assert_eq!(result.values, vec![vec![1], vec![3], vec![5], vec![7], vec![9]]);
+        assert_eq!(
+            result.values,
+            vec![vec![1], vec![3], vec![5], vec![7], vec![9]]
+        );
 
         // Verify remaining elements: [0, 2, 4, 6, 8]
         let values = collect_merk_values(&merk, &grove_version);
@@ -1612,9 +1603,18 @@ mod tests {
 
         // Setup: Insert 3 elements
         let setup_batch = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![1] },
-            ListOp::InsertAtPosition { position: 1, value: vec![2] },
-            ListOp::InsertAtPosition { position: 2, value: vec![3] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![1],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![2],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![3],
+            },
         ];
 
         merk.apply_list_batch(&setup_batch, &grove_version)
@@ -1623,14 +1623,20 @@ mod tests {
 
         // Try batch with invalid operation (position out of bounds)
         let bad_batch = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![99] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![99],
+            },
             ListOp::DeleteAtPosition { position: 100 }, // Invalid!
         ];
 
         let result = merk.apply_list_batch(&bad_batch, &grove_version);
-        
+
         // Should fail
-        assert!(result.value.is_err(), "batch should fail on invalid position");
+        assert!(
+            result.value.is_err(),
+            "batch should fail on invalid position"
+        );
 
         // Verify original state unchanged: [1, 2, 3]
         let values = collect_merk_values(&merk, &grove_version);
@@ -1715,7 +1721,7 @@ mod tests {
         // Verify tree has 100 elements in order
         let values = collect_merk_values(&merk, &grove_version);
         assert_eq!(values.len(), 100);
-        
+
         for (i, value) in values.iter().enumerate() {
             assert_eq!(value, &vec![i as u8]);
         }
@@ -1728,9 +1734,18 @@ mod tests {
         let mut merk = make_list_merk();
 
         let batch = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![1] },
-            ListOp::InsertAtPosition { position: 1, value: vec![2] },
-            ListOp::InsertAtPosition { position: 2, value: vec![3] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![1],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![2],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![3],
+            },
         ];
 
         merk.apply_list_batch(&batch, &grove_version)
@@ -1750,17 +1765,32 @@ mod tests {
         let mut merk = make_list_merk();
 
         let batch = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![1; 100] },
-            ListOp::InsertAtPosition { position: 1, value: vec![2; 100] },
-            ListOp::InsertAtPosition { position: 2, value: vec![3; 100] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![1; 100],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![2; 100],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![3; 100],
+            },
         ];
 
         let cost_context = merk.apply_list_batch(&batch, &grove_version);
-        
+
         // Verify cost was tracked
-        assert!(cost_context.cost.storage_cost.added_bytes > 0, "should track storage costs");
-        assert!(cost_context.cost.seek_count > 0, "should track seek operations");
-        
+        assert!(
+            cost_context.cost.storage_cost.added_bytes > 0,
+            "should track storage costs"
+        );
+        assert!(
+            cost_context.cost.seek_count > 0,
+            "should track seek operations"
+        );
+
         // Also verify the operation succeeded
         cost_context.unwrap().expect("batch should succeed");
     }
@@ -1773,24 +1803,36 @@ mod tests {
         let mut merk = make_list_merk();
 
         // Start with initial character 'H'
-        let batch1 = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![b'H'] },
-        ];
-        let result1 = merk.apply_list_batch(&batch1, &grove_version).unwrap().unwrap();
+        let batch1 = vec![ListOp::InsertAtPosition {
+            position: 0,
+            value: vec![b'H'],
+        }];
+        let result1 = merk
+            .apply_list_batch(&batch1, &grove_version)
+            .unwrap()
+            .unwrap();
         let key_h = result1.keys[0].clone();
 
         // Insert 'i' after 'H' using InsertAfterKey
-        let batch2 = vec![
-            ListOp::InsertAfterKey { target_key: key_h.clone(), value: vec![b'i'] },
-        ];
-        let result2 = merk.apply_list_batch(&batch2, &grove_version).unwrap().unwrap();
+        let batch2 = vec![ListOp::InsertAfterKey {
+            target_key: key_h.clone(),
+            value: vec![b'i'],
+        }];
+        let result2 = merk
+            .apply_list_batch(&batch2, &grove_version)
+            .unwrap()
+            .unwrap();
         let key_i = result2.keys[0].clone();
 
         // Insert '!' after 'i' using InsertAfterKey
-        let batch3 = vec![
-            ListOp::InsertAfterKey { target_key: key_i.clone(), value: vec![b'!'] },
-        ];
-        let result3 = merk.apply_list_batch(&batch3, &grove_version).unwrap().unwrap();
+        let batch3 = vec![ListOp::InsertAfterKey {
+            target_key: key_i.clone(),
+            value: vec![b'!'],
+        }];
+        let result3 = merk
+            .apply_list_batch(&batch3, &grove_version)
+            .unwrap()
+            .unwrap();
 
         // Verify we have 3 keys
         assert_eq!(result1.keys.len(), 1);
@@ -1810,28 +1852,45 @@ mod tests {
 
         // Setup: Insert three characters
         let setup_batch = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![b'A'] },
-            ListOp::InsertAtPosition { position: 1, value: vec![b'B'] },
-            ListOp::InsertAtPosition { position: 2, value: vec![b'C'] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![b'A'],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![b'B'],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![b'C'],
+            },
         ];
-        let setup_result = merk.apply_list_batch(&setup_batch, &grove_version)
+        let setup_result = merk
+            .apply_list_batch(&setup_batch, &grove_version)
             .unwrap()
             .unwrap();
-        
+
         let key_a = setup_result.keys[0].clone();
         let key_b = setup_result.keys[1].clone();
 
         // Batch with mixed operations:
         // 1. Insert 'X' after 'A' (UUID-based)
-        // 2. Insert 'Y' after 'B' (UUID-based)  
+        // 2. Insert 'Y' after 'B' (UUID-based)
         // 3. Delete at position 0 (positional)
         let mixed_batch = vec![
-            ListOp::InsertAfterKey { target_key: key_a.clone(), value: vec![b'X'] },
-            ListOp::InsertAfterKey { target_key: key_b.clone(), value: vec![b'Y'] },
+            ListOp::InsertAfterKey {
+                target_key: key_a.clone(),
+                value: vec![b'X'],
+            },
+            ListOp::InsertAfterKey {
+                target_key: key_b.clone(),
+                value: vec![b'Y'],
+            },
             ListOp::DeleteAtPosition { position: 0 },
         ];
 
-        let result = merk.apply_list_batch(&mixed_batch, &grove_version)
+        let result = merk
+            .apply_list_batch(&mixed_batch, &grove_version)
             .unwrap()
             .unwrap();
 
@@ -1852,41 +1911,47 @@ mod tests {
 
         // Initial setup: Insert 'H' at position 0
         let key_h = uuid::Uuid::new_v4().as_bytes().to_vec();
-        let batch1 = vec![
-            ListOp::InsertAtPositionWithKey { position: 0, key: key_h.clone(), value: vec![b'H'] },
-        ];
-        merk.apply_list_batch(&batch1, &grove_version).unwrap().unwrap();
+        let batch1 = vec![ListOp::InsertAtPositionWithKey {
+            position: 0,
+            key: key_h.clone(),
+            value: vec![b'H'],
+        }];
+        merk.apply_list_batch(&batch1, &grove_version)
+            .unwrap()
+            .unwrap();
 
         // Client generates UUID locally for 'i'
         let key_i = uuid::Uuid::new_v4().as_bytes().to_vec();
-        
+
         // Insert 'i' after 'H' using InsertAfterKeyWithKey with client-provided UUID
-        let batch2 = vec![
-            ListOp::InsertAfterKeyWithKey { 
-                target_key: key_h.clone(), 
-                key: key_i.clone(), 
-                value: vec![b'i'] 
-            },
-        ];
-        let result2 = merk.apply_list_batch(&batch2, &grove_version).unwrap().unwrap();
-        
+        let batch2 = vec![ListOp::InsertAfterKeyWithKey {
+            target_key: key_h.clone(),
+            key: key_i.clone(),
+            value: vec![b'i'],
+        }];
+        let result2 = merk
+            .apply_list_batch(&batch2, &grove_version)
+            .unwrap()
+            .unwrap();
+
         // Verify the returned key matches what we provided
         assert_eq!(result2.keys.len(), 1);
         assert_eq!(result2.keys[0], key_i);
 
         // Client generates UUID locally for '!'
         let key_exclaim = uuid::Uuid::new_v4().as_bytes().to_vec();
-        
+
         // Insert '!' after 'i' using InsertAfterKeyWithKey
-        let batch3 = vec![
-            ListOp::InsertAfterKeyWithKey { 
-                target_key: key_i.clone(), 
-                key: key_exclaim.clone(), 
-                value: vec![b'!'] 
-            },
-        ];
-        let result3 = merk.apply_list_batch(&batch3, &grove_version).unwrap().unwrap();
-        
+        let batch3 = vec![ListOp::InsertAfterKeyWithKey {
+            target_key: key_i.clone(),
+            key: key_exclaim.clone(),
+            value: vec![b'!'],
+        }];
+        let result3 = merk
+            .apply_list_batch(&batch3, &grove_version)
+            .unwrap()
+            .unwrap();
+
         // Verify the returned key matches what we provided
         assert_eq!(result3.keys.len(), 1);
         assert_eq!(result3.keys[0], key_exclaim);
@@ -1909,24 +1974,39 @@ mod tests {
         let key_a = uuid::Uuid::new_v4().as_bytes().to_vec();
         let key_b = uuid::Uuid::new_v4().as_bytes().to_vec();
         let key_c = uuid::Uuid::new_v4().as_bytes().to_vec();
-        
+
         let setup_batch = vec![
-            ListOp::InsertAtPositionWithKey { position: 0, key: key_a.clone(), value: vec![0, b'a'] },
-            ListOp::InsertAtPositionWithKey { position: 1, key: key_b.clone(), value: vec![0, b'b'] },
-            ListOp::InsertAtPositionWithKey { position: 2, key: key_c.clone(), value: vec![0, b'c'] },
+            ListOp::InsertAtPositionWithKey {
+                position: 0,
+                key: key_a.clone(),
+                value: vec![0, b'a'],
+            },
+            ListOp::InsertAtPositionWithKey {
+                position: 1,
+                key: key_b.clone(),
+                value: vec![0, b'b'],
+            },
+            ListOp::InsertAtPositionWithKey {
+                position: 2,
+                key: key_c.clone(),
+                value: vec![0, b'c'],
+            },
         ];
-        merk.apply_list_batch(&setup_batch, &grove_version).unwrap().unwrap();
+        merk.apply_list_batch(&setup_batch, &grove_version)
+            .unwrap()
+            .unwrap();
 
         // Mark 'b' as deleted (tombstone) using UpdateValueByKey
         // Value format: [deleted_flag=1, char_byte]
-        let update_batch = vec![
-            ListOp::UpdateValueByKey { 
-                key: key_b.clone(), 
-                value: vec![1, b'b']  // Tombstone: deleted_flag=1
-            },
-        ];
-        let result = merk.apply_list_batch(&update_batch, &grove_version).unwrap().unwrap();
-        
+        let update_batch = vec![ListOp::UpdateValueByKey {
+            key: key_b.clone(),
+            value: vec![1, b'b'], // Tombstone: deleted_flag=1
+        }];
+        let result = merk
+            .apply_list_batch(&update_batch, &grove_version)
+            .unwrap()
+            .unwrap();
+
         // Verify the returned key matches
         assert_eq!(result.keys.len(), 1);
         assert_eq!(result.keys[0], key_b);
@@ -1934,15 +2014,16 @@ mod tests {
         // Now insert 'd' after 'b' using InsertAfterKeyWithKey
         // This should work reliably because UpdateValueByKey didn't change tree structure
         let key_d = uuid::Uuid::new_v4().as_bytes().to_vec();
-        let insert_batch = vec![
-            ListOp::InsertAfterKeyWithKey {
-                target_key: key_b.clone(),
-                key: key_d.clone(),
-                value: vec![0, b'd'],
-            },
-        ];
-        let insert_result = merk.apply_list_batch(&insert_batch, &grove_version).unwrap().unwrap();
-        
+        let insert_batch = vec![ListOp::InsertAfterKeyWithKey {
+            target_key: key_b.clone(),
+            key: key_d.clone(),
+            value: vec![0, b'd'],
+        }];
+        let insert_result = merk
+            .apply_list_batch(&insert_batch, &grove_version)
+            .unwrap()
+            .unwrap();
+
         // Verify insert after tombstone works
         assert_eq!(insert_result.keys.len(), 1);
         assert_eq!(insert_result.keys[0], key_d);
@@ -1955,27 +2036,44 @@ mod tests {
     }
 
     #[test]
-    fn test_node_index_position_caching() {
-        // Test that the node index correctly caches positions
-        // This demonstrates Option 2: O(1) position lookups
+    fn test_get_key_position_from_metadata() {
+        // Ensure get_key_position derives positions from subtree metadata
+        // without any auxiliary node index.
         let grove_version = GroveVersion::latest();
         let mut merk = make_list_merk();
 
         // Insert 5 elements
         let batch = vec![
-            ListOp::InsertAtPosition { position: 0, value: vec![b'a'] },
-            ListOp::InsertAtPosition { position: 1, value: vec![b'b'] },
-            ListOp::InsertAtPosition { position: 2, value: vec![b'c'] },
-            ListOp::InsertAtPosition { position: 3, value: vec![b'd'] },
-            ListOp::InsertAtPosition { position: 4, value: vec![b'e'] },
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![b'a'],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![b'b'],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![b'c'],
+            },
+            ListOp::InsertAtPosition {
+                position: 3,
+                value: vec![b'd'],
+            },
+            ListOp::InsertAtPosition {
+                position: 4,
+                value: vec![b'e'],
+            },
         ];
-        let result = merk.apply_list_batch(&batch, &grove_version).unwrap().unwrap();
-        
+        let result = merk
+            .apply_list_batch(&batch, &grove_version)
+            .unwrap()
+            .unwrap();
+
         // Capture the keys
         let keys: Vec<Vec<u8>> = result.keys;
-        
-        // Verify positions are cached correctly
-        // After rebuild_node_index, each key should map to its correct position
+
+        // Verify positions are computed correctly using subtree sizes
         for (expected_pos, key) in keys.iter().enumerate() {
             let cached_pos = merk.get_key_position(key);
             assert_eq!(
@@ -1986,28 +2084,167 @@ mod tests {
                 expected_pos
             );
         }
-        
+
         // Now insert in the middle and verify positions update
-        let insert_batch = vec![
-            ListOp::InsertAtPosition { position: 2, value: vec![b'x'] },
-        ];
-        let insert_result = merk.apply_list_batch(&insert_batch, &grove_version).unwrap().unwrap();
+        let insert_batch = vec![ListOp::InsertAtPosition {
+            position: 2,
+            value: vec![b'x'],
+        }];
+        let insert_result = merk
+            .apply_list_batch(&insert_batch, &grove_version)
+            .unwrap()
+            .unwrap();
         let key_x = &insert_result.keys[0];
-        
+
         // After inserting at position 2, positions should be:
         // 0: a, 1: b, 2: x, 3: c, 4: d, 5: e
         assert_eq!(merk.get_key_position(&keys[0]), Some(0)); // a
         assert_eq!(merk.get_key_position(&keys[1]), Some(1)); // b
-        assert_eq!(merk.get_key_position(key_x), Some(2));     // x (new)
+        assert_eq!(merk.get_key_position(key_x), Some(2)); // x (new)
         assert_eq!(merk.get_key_position(&keys[2]), Some(3)); // c (shifted)
         assert_eq!(merk.get_key_position(&keys[3]), Some(4)); // d (shifted)
         assert_eq!(merk.get_key_position(&keys[4]), Some(5)); // e (shifted)
-        
+
         // This demonstrates:
-        // 1. Positions are correctly computed during in-order traversal
-        // 2. Index is rebuilt after each operation, keeping positions accurate
-        // 3. O(1) position lookups via get_position_from_index()
-        // 4. Ready for efficient proof generation
+        // 1. Positions are accurately derived from subtree metadata
+        // 2. Updates stay consistent after insertions
+        // 3. get_key_position no longer depends on a precomputed cache
+    }
+
+    #[test]
+    fn test_get_key_position_after_reference_inserts() {
+        use uuid::Uuid;
+
+        let grove_version = GroveVersion::latest();
+        let mut merk = make_list_merk();
+
+        // Insert A, B, C
+        let batch = vec![
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![b'A'],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![b'B'],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![b'C'],
+            },
+        ];
+        let result = merk
+            .apply_list_batch(&batch, &grove_version)
+            .unwrap()
+            .unwrap();
+        let key_a = result.keys[0].clone();
+        let key_b = result.keys[1].clone();
+        let key_c = result.keys[2].clone();
+
+        // Mark C as tombstone via UpdateValueByKey
+        let delete_batch = vec![ListOp::UpdateValueByKey {
+            key: key_c.clone(),
+            value: vec![1, b'C'],
+        }];
+        merk.apply_list_batch(&delete_batch, &grove_version)
+            .unwrap()
+            .unwrap();
+
+        // Insert D after B
+        let key_d = Uuid::new_v4().as_bytes().to_vec();
+        let insert_d = vec![ListOp::InsertAfterKeyWithKey {
+            target_key: key_b.clone(),
+            key: key_d.clone(),
+            value: vec![b'D'],
+        }];
+        merk.apply_list_batch(&insert_d, &grove_version)
+            .unwrap()
+            .unwrap();
+
+        // Insert E after D
+        let key_e = Uuid::new_v4().as_bytes().to_vec();
+        let insert_e = vec![ListOp::InsertAfterKeyWithKey {
+            target_key: key_d.clone(),
+            key: key_e.clone(),
+            value: vec![b'E'],
+        }];
+        merk.apply_list_batch(&insert_e, &grove_version)
+            .unwrap()
+            .unwrap();
+
+        let pos_e = merk.get_key_position(&key_e).expect("position for E");
+        assert_eq!(pos_e, 3, "E should follow D even after tombstone updates");
+
+        let proof = merk.prove_position(pos_e, &grove_version).unwrap().unwrap();
+        let verification = crate::proofs::positional::verify_positional_proof(
+            &proof.proof,
+            pos_e,
+            merk.root_hash().unwrap(),
+            &grove_version,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(verification.key, key_e);
+        assert_eq!(verification.value, vec![0, b'E']);
+    }
+
+    #[test]
+    fn test_key_cache_invalidation_single_ops() {
+        // Verify that single-operation inserts and deletes invalidate the key cache
+        let grove_version = GroveVersion::latest();
+        let mut merk = make_list_merk();
+
+        // Seed tree with three elements via batch insert
+        let setup_batch = vec![
+            ListOp::InsertAtPosition {
+                position: 0,
+                value: vec![b'a'],
+            },
+            ListOp::InsertAtPosition {
+                position: 1,
+                value: vec![b'b'],
+            },
+            ListOp::InsertAtPosition {
+                position: 2,
+                value: vec![b'c'],
+            },
+        ];
+        let initial_keys = merk
+            .apply_list_batch(&setup_batch, &grove_version)
+            .unwrap()
+            .unwrap()
+            .keys;
+
+        // Prime the cache by querying existing positions
+        for (expected_pos, key) in initial_keys.iter().enumerate() {
+            assert_eq!(
+                merk.get_key_position(key),
+                Some(expected_pos as u64),
+                "initial cache miss for position {}",
+                expected_pos
+            );
+        }
+
+        // Insert new value via single-operation API at position 1
+        let inserted_key = merk
+            .insert_at_position(1, vec![b'X'], &grove_version)
+            .unwrap()
+            .unwrap();
+
+        // Cache should report updated positions after insert
+        assert_eq!(merk.get_key_position(&initial_keys[0]), Some(0));
+        assert_eq!(merk.get_key_position(&inserted_key), Some(1));
+        assert_eq!(merk.get_key_position(&initial_keys[1]), Some(2));
+        assert_eq!(merk.get_key_position(&initial_keys[2]), Some(3));
+
+        // Delete the inserted element using single-operation API
+        let (deleted_key, _deleted_value) =
+            merk.delete_at_position(1, &grove_version).unwrap().unwrap();
+        assert_eq!(deleted_key, inserted_key);
+
+        // Cache should again reflect the new ordering
+        assert_eq!(merk.get_key_position(&initial_keys[0]), Some(0));
+        assert_eq!(merk.get_key_position(&initial_keys[1]), Some(1));
+        assert_eq!(merk.get_key_position(&initial_keys[2]), Some(2));
     }
 }
-
