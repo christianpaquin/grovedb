@@ -24,6 +24,18 @@ impl Element {
         Element::new_tree_with_flags(Default::default(), flags)
     }
 
+    #[cfg(all(feature = "minimal", feature = "list_mode"))]
+    /// Set element to default empty list tree without flags
+    pub fn empty_list_tree() -> Self {
+        Element::new_list_tree(Default::default())
+    }
+
+    #[cfg(all(feature = "minimal", feature = "list_mode"))]
+    /// Set element to default empty list tree with flags
+    pub fn empty_list_tree_with_flags(flags: Option<ElementFlags>) -> Self {
+        Element::new_list_tree_with_flags(Default::default(), flags)
+    }
+
     #[cfg(feature = "minimal")]
     /// Set element to default empty sum tree without flags
     pub fn empty_sum_tree() -> Self {
@@ -143,6 +155,21 @@ impl Element {
         flags: Option<ElementFlags>,
     ) -> Self {
         Element::Tree(maybe_root_key, flags)
+    }
+
+    #[cfg(all(feature = "minimal", feature = "list_mode"))]
+    /// Set element to a list tree without flags
+    pub fn new_list_tree(maybe_root_key: Option<Vec<u8>>) -> Self {
+        Element::ListTree(maybe_root_key, None)
+    }
+
+    #[cfg(all(feature = "minimal", feature = "list_mode"))]
+    /// Set element to a list tree with flags
+    pub fn new_list_tree_with_flags(
+        maybe_root_key: Option<Vec<u8>>,
+        flags: Option<ElementFlags>,
+    ) -> Self {
+        Element::ListTree(maybe_root_key, flags)
     }
 
     #[cfg(feature = "minimal")]

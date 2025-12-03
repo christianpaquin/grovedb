@@ -17,3 +17,7 @@ grovedb-version =  { version = "3.1.0", path = "../grovedb-version" }
 version = "0.10.1"
 default-features = false
 features = ["napi-6", "event-queue-api", "try-catch-api"]
+
+[features]
+default = []
+list_mode = ["grovedb/list_mode"]

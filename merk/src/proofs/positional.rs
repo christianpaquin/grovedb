@@ -718,16 +718,7 @@ fn verify_position_in_tree(
 
 #[cfg(feature = "list_mode")]
 fn normalize_list_value(value: Vec<u8>) -> Vec<u8> {
-    match value.first() {
-        Some(flag) if *flag <= 1 => value,
-        Some(_) => {
-            let mut with_flag = Vec::with_capacity(value.len() + 1);
-            with_flag.push(0);
-            with_flag.extend(value);
-            with_flag
-        }
-        None => vec![0],
-    }
+    value
 }
 
 #[cfg(all(test, feature = "full", feature = "list_mode"))]

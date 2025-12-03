@@ -2137,7 +2137,7 @@ mod tests {
             .apply_list_batch(&batch, &grove_version)
             .unwrap()
             .unwrap();
-        let key_a = result.keys[0].clone();
+        let _key_a = result.keys[0].clone();
         let key_b = result.keys[1].clone();
         let key_c = result.keys[2].clone();
 
@@ -2185,7 +2185,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(verification.key, key_e);
-        assert_eq!(verification.value, vec![0, b'E']);
+        assert_eq!(verification.value, vec![b'E']);
     }
 
     #[test]

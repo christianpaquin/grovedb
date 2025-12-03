@@ -37,6 +37,8 @@ fn element_to_string(element: Element) -> String {
         Element::SumItem(..) => "sum_item".to_string(),
         Element::Reference(..) => "reference".to_string(),
         Element::Tree(..) => "tree".to_string(),
+        #[cfg(feature = "list_mode")]
+        Element::ListTree(..) => "list_tree".to_string(),
         Element::SumTree(..) => "sum_tree".to_string(),
         Element::BigSumTree(..) => "big_sum_tree".to_string(),
         Element::CountTree(..) => "count_tree".to_string(),
@@ -72,6 +74,12 @@ pub fn js_object_to_element<'a, C: Context<'a>>(
             let tree_vec = js_buffer_to_vec_u8(js_buffer, cx);
             Ok(Element::new_tree(Some(tree_vec)))
         }
+        #[cfg(feature = "list_mode")]
+        "list_tree" => {
+            let js_buffer: Handle<JsBuffer> = js_object.get(cx, "value")?;
+            let tree_vec = js_buffer_to_vec_u8(js_buffer, cx);
+            Ok(Element::new_list_tree(Some(tree_vec)))
+        }
         _ => cx.throw_error(format!("Unexpected element type {element_string}")),
     }
 }
@@ -94,6 +102,8 @@ pub fn element_to_js_object<'a, C: Context<'a>>(
         Element::SumItem(..) => nested_vecs_to_js(vec![], cx)?,
         Element::Reference(..) => nested_vecs_to_js(vec![], cx)?,
         Element::Tree(..) => nested_vecs_to_js(vec![], cx)?,
+        #[cfg(feature = "list_mode")]
+        Element::ListTree(..) => nested_vecs_to_js(vec![], cx)?,
         Element::SumTree(..) => nested_vecs_to_js(vec![], cx)?,
         Element::BigSumTree(..) => nested_vecs_to_js(vec![], cx)?,
         Element::CountTree(..) => nested_vecs_to_js(vec![], cx)?,

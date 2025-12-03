@@ -234,6 +234,10 @@ where {
             | Element::CountTree(..)
             | Element::CountSumTree(..) => Ok(element),
             Element::Tree(..) => Err(Error::InvalidQuery("path_queries can not refer to trees")),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => {
+                Err(Error::InvalidQuery("path_queries can not refer to trees"))
+            }
         }
     }
 
@@ -358,6 +362,10 @@ where {
                         | Element::CountSumTree(..) => Err(Error::InvalidQuery(
                             "path_queries can only refer to items and references",
                         )),
+                        #[cfg(feature = "list_mode")]
+                        Element::ListTree(..) => Err(Error::InvalidQuery(
+                            "path_queries can only refer to items and references",
+                        )),
                     }
                 }
                 _ => Err(Error::CorruptedCodeExecution(
@@ -478,6 +486,11 @@ where {
                             "path_queries can only refer to items, sum items, references and sum \
                              trees",
                         )),
+                        #[cfg(feature = "list_mode")]
+                        Element::ListTree(..) => Err(Error::InvalidQuery(
+                            "path_queries can only refer to items, sum items, references and sum \
+                             trees",
+                        )),
                     }
                 }
                 _ => Err(Error::CorruptedCodeExecution(
@@ -561,6 +574,11 @@ where {
                         | Element::CountTree(..)
                         | Element::CountSumTree(..)
                         | Element::Item(..) => Err(Error::InvalidQuery(
+                            "path_queries over sum items can only refer to sum items and \
+                             references",
+                        )),
+                        #[cfg(feature = "list_mode")]
+                        Element::ListTree(..) => Err(Error::InvalidQuery(
                             "path_queries over sum items can only refer to sum items and \
                              references",
                         )),

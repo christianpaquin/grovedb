@@ -1025,6 +1025,11 @@ where
                 "references can not point to trees being updated",
             ))
             .wrap_with_cost(cost),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => Err(Error::InvalidBatchOperation(
+                "references can not point to trees being updated",
+            ))
+            .wrap_with_cost(cost),
         }
     }
 
@@ -1147,6 +1152,11 @@ where
                             "references can not point to trees being updated",
                         ))
                         .wrap_with_cost(cost),
+                        #[cfg(feature = "list_mode")]
+                        Element::ListTree(..) => Err(Error::InvalidBatchOperation(
+                            "references can not point to trees being updated",
+                        ))
+                        .wrap_with_cost(cost),
                     }
                 }
                 GroveOp::InsertOnly { element } => match element {
@@ -1175,6 +1185,11 @@ where
                     | Element::BigSumTree(..)
                     | Element::CountTree(..)
                     | Element::CountSumTree(..) => Err(Error::InvalidBatchOperation(
+                        "references can not point to trees being updated",
+                    ))
+                    .wrap_with_cost(cost),
+                    #[cfg(feature = "list_mode")]
+                    Element::ListTree(..) => Err(Error::InvalidBatchOperation(
                         "references can not point to trees being updated",
                     ))
                     .wrap_with_cost(cost),
@@ -1351,6 +1366,26 @@ where
                     | Element::BigSumTree(..)
                     | Element::CountTree(..)
                     | Element::CountSumTree(..) => {
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            element
+                                .get_feature_type(in_tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        cost_return_on_error!(
+                            &mut cost,
+                            element.insert_subtree_into_batch_operations(
+                                key_info.get_key_clone(),
+                                NULL_HASH,
+                                false,
+                                &mut batch_operations,
+                                merk_feature_type,
+                                grove_version,
+                            )
+                        );
+                    }
+                    #[cfg(feature = "list_mode")]
+                    Element::ListTree(..) => {
                         let merk_feature_type = cost_return_on_error!(
                             &mut cost,
                             element
@@ -1851,60 +1886,46 @@ impl GroveDb {
                                                 | GroveOp::InsertOnly { element }
                                                 | GroveOp::Replace { element }
                                                 | GroveOp::Patch { element, .. } => {
-                                                    if let Element::Tree(_, flags) = element {
-                                                        *mutable_occupied_entry =
-                                                            GroveOp::InsertTreeWithRootHash {
-                                                                hash: root_hash,
-                                                                root_key: calculated_root_key,
-                                                                flags: flags.clone(),
-                                                                aggregate_data:
-                                                                    AggregateData::NoAggregateData,
-                                                            }
-                                                    } else if let Element::SumTree(.., flags) =
-                                                        element
-                                                    {
-                                                        *mutable_occupied_entry =
-                                                            GroveOp::InsertTreeWithRootHash {
-                                                                hash: root_hash,
-                                                                root_key: calculated_root_key,
-                                                                flags: flags.clone(),
-                                                                aggregate_data,
-                                                            }
-                                                    } else if let Element::BigSumTree(.., flags) =
-                                                        element
-                                                    {
-                                                        *mutable_occupied_entry =
-                                                            GroveOp::InsertTreeWithRootHash {
-                                                                hash: root_hash,
-                                                                root_key: calculated_root_key,
-                                                                flags: flags.clone(),
-                                                                aggregate_data,
-                                                            }
-                                                    } else if let Element::CountTree(.., flags) =
-                                                        element
-                                                    {
-                                                        *mutable_occupied_entry =
-                                                            GroveOp::InsertTreeWithRootHash {
-                                                                hash: root_hash,
-                                                                root_key: calculated_root_key,
-                                                                flags: flags.clone(),
-                                                                aggregate_data,
-                                                            }
-                                                    } else if let Element::CountSumTree(.., flags) =
-                                                        element
-                                                    {
-                                                        *mutable_occupied_entry =
-                                                            GroveOp::InsertTreeWithRootHash {
-                                                                hash: root_hash,
-                                                                root_key: calculated_root_key,
-                                                                flags: flags.clone(),
-                                                                aggregate_data,
-                                                            }
-                                                    } else {
-                                                        return Err(Error::InvalidBatchOperation(
-                                                            "insertion of element under a non tree",
-                                                        ))
-                                                        .wrap_with_cost(cost);
+                                                    match element {
+                                                        Element::Tree(_, flags) => {
+                                                            *mutable_occupied_entry =
+                                                                GroveOp::InsertTreeWithRootHash {
+                                                                    hash: root_hash,
+                                                                    root_key: calculated_root_key,
+                                                                    flags: flags.clone(),
+                                                                    aggregate_data:
+                                                                        AggregateData::NoAggregateData,
+                                                                }
+                                                        }
+                                                        #[cfg(feature = "list_mode")]
+                                                        Element::ListTree(_, flags) => {
+                                                            *mutable_occupied_entry =
+                                                                GroveOp::InsertTreeWithRootHash {
+                                                                    hash: root_hash,
+                                                                    root_key: calculated_root_key,
+                                                                    flags: flags.clone(),
+                                                                    aggregate_data:
+                                                                        AggregateData::NoAggregateData,
+                                                                }
+                                                        }
+                                                        Element::SumTree(.., flags)
+                                                        | Element::BigSumTree(.., flags)
+                                                        | Element::CountTree(.., flags)
+                                                        | Element::CountSumTree(.., flags) => {
+                                                            *mutable_occupied_entry =
+                                                                GroveOp::InsertTreeWithRootHash {
+                                                                    hash: root_hash,
+                                                                    root_key: calculated_root_key,
+                                                                    flags: flags.clone(),
+                                                                    aggregate_data,
+                                                                }
+                                                        }
+                                                        _ => {
+                                                            return Err(Error::InvalidBatchOperation(
+                                                                "insertion of element under a non tree",
+                                                            ))
+                                                            .wrap_with_cost(cost);
+                                                        }
                                                     }
                                                 }
                                                 GroveOp::RefreshReference { .. } => {

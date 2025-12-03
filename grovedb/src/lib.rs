@@ -626,14 +626,14 @@ impl GroveDb {
         let key_ref = key.as_ref();
 
         Self::get_element_from_subtree(parent_tree, key_ref, grove_version).flat_map_ok(|element| {
-            if let Element::Tree(_, flag) = element {
-                let tree = Element::new_tree_with_flags(maybe_root_key, flag);
+            if let Element::Tree(_, flag) = &element {
+                let tree = Element::new_tree_with_flags(maybe_root_key, flag.clone());
                 tree.insert_subtree(parent_tree, key_ref, root_tree_hash, None, grove_version)
-            } else if let Element::SumTree(.., flag) = element {
+            } else if let Element::SumTree(.., flag) = &element {
                 let tree = Element::new_sum_tree_with_flags_and_sum_value(
                     maybe_root_key,
                     aggregate_data.as_sum_i64(),
-                    flag,
+                    flag.clone(),
                 );
                 tree.insert_subtree(
                     parent_tree,
@@ -642,11 +642,11 @@ impl GroveDb {
                     None,
                     grove_version,
                 )
-            } else if let Element::BigSumTree(.., flag) = element {
+            } else if let Element::BigSumTree(.., flag) = &element {
                 let tree = Element::new_big_sum_tree_with_flags_and_sum_value(
                     maybe_root_key,
                     aggregate_data.as_summed_i128(),
-                    flag,
+                    flag.clone(),
                 );
                 tree.insert_subtree(
                     parent_tree,
@@ -655,11 +655,11 @@ impl GroveDb {
                     None,
                     grove_version,
                 )
-            } else if let Element::CountTree(.., flag) = element {
+            } else if let Element::CountTree(.., flag) = &element {
                 let tree = Element::new_count_tree_with_flags_and_count_value(
                     maybe_root_key,
                     aggregate_data.as_count_u64(),
-                    flag,
+                    flag.clone(),
                 );
                 tree.insert_subtree(
                     parent_tree,
@@ -668,12 +668,12 @@ impl GroveDb {
                     None,
                     grove_version,
                 )
-            } else if let Element::CountSumTree(.., flag) = element {
+            } else if let Element::CountSumTree(.., flag) = &element {
                 let tree = Element::new_count_sum_tree_with_flags_and_sum_and_count_value(
                     maybe_root_key,
                     aggregate_data.as_count_u64(),
                     aggregate_data.as_sum_i64(),
-                    flag,
+                    flag.clone(),
                 );
                 tree.insert_subtree(
                     parent_tree,
@@ -683,10 +683,23 @@ impl GroveDb {
                     grove_version,
                 )
             } else {
-                Err(Error::InvalidPath(
-                    "can only propagate on tree items".to_owned(),
-                ))
-                .wrap_with_cost(Default::default())
+                #[cfg(feature = "list_mode")]
+                {
+                    if let Element::ListTree(_, flag) = &element {
+                        let tree =
+                            Element::new_list_tree_with_flags(maybe_root_key, flag.clone());
+                        return tree.insert_subtree(
+                            parent_tree,
+                            key_ref,
+                            root_tree_hash,
+                            None,
+                            grove_version,
+                        );
+                    }
+                }
+
+                Err(Error::InvalidPath("can only propagate on tree items".to_owned()))
+                    .wrap_with_cost(Default::default())
             }
         })
     }
@@ -709,103 +722,125 @@ impl GroveDb {
         let mut cost = OperationCost::default();
         Self::get_element_from_subtree(parent_tree, key.as_ref(), grove_version).flat_map_ok(
             |element| {
-                if let Element::Tree(_, flag) = element {
-                    let tree = Element::new_tree_with_flags(maybe_root_key, flag);
-                    let merk_feature_type = cost_return_on_error!(
-                        &mut cost,
-                        tree.get_feature_type(parent_tree.tree_type)
-                            .wrap_with_cost(OperationCost::default())
-                    );
-                    tree.insert_subtree_into_batch_operations(
-                        key,
-                        root_tree_hash,
-                        true,
-                        batch_operations,
-                        merk_feature_type,
-                        grove_version,
-                    )
-                } else if let Element::SumTree(.., flag) = element {
-                    let tree = Element::new_sum_tree_with_flags_and_sum_value(
-                        maybe_root_key,
-                        aggregate_data.as_sum_i64(),
-                        flag,
-                    );
-                    let merk_feature_type = cost_return_on_error!(
-                        &mut cost,
-                        tree.get_feature_type(parent_tree.tree_type)
-                            .wrap_with_cost(OperationCost::default())
-                    );
-                    tree.insert_subtree_into_batch_operations(
-                        key,
-                        root_tree_hash,
-                        true,
-                        batch_operations,
-                        merk_feature_type,
-                        grove_version,
-                    )
-                } else if let Element::BigSumTree(.., flag) = element {
-                    let tree = Element::new_big_sum_tree_with_flags_and_sum_value(
-                        maybe_root_key,
-                        aggregate_data.as_summed_i128(),
-                        flag,
-                    );
-                    let merk_feature_type = cost_return_on_error!(
-                        &mut cost,
-                        tree.get_feature_type(parent_tree.tree_type)
-                            .wrap_with_cost(OperationCost::default())
-                    );
-                    tree.insert_subtree_into_batch_operations(
-                        key,
-                        root_tree_hash,
-                        true,
-                        batch_operations,
-                        merk_feature_type,
-                        grove_version,
-                    )
-                } else if let Element::CountTree(.., flag) = element {
-                    let tree = Element::new_count_tree_with_flags_and_count_value(
-                        maybe_root_key,
-                        aggregate_data.as_count_u64(),
-                        flag,
-                    );
-                    let merk_feature_type = cost_return_on_error!(
-                        &mut cost,
-                        tree.get_feature_type(parent_tree.tree_type)
-                            .wrap_with_cost(OperationCost::default())
-                    );
-                    tree.insert_subtree_into_batch_operations(
-                        key,
-                        root_tree_hash,
-                        true,
-                        batch_operations,
-                        merk_feature_type,
-                        grove_version,
-                    )
-                } else if let Element::CountSumTree(.., flag) = element {
-                    let tree = Element::new_count_sum_tree_with_flags_and_sum_and_count_value(
-                        maybe_root_key,
-                        aggregate_data.as_count_u64(),
-                        aggregate_data.as_sum_i64(),
-                        flag,
-                    );
-                    let merk_feature_type = cost_return_on_error!(
-                        &mut cost,
-                        tree.get_feature_type(parent_tree.tree_type)
-                            .wrap_with_cost(OperationCost::default())
-                    );
-                    tree.insert_subtree_into_batch_operations(
-                        key,
-                        root_tree_hash,
-                        true,
-                        batch_operations,
-                        merk_feature_type,
-                        grove_version,
-                    )
-                } else {
-                    Err(Error::InvalidPath(
+                match element {
+                    Element::Tree(_, flag) => {
+                        let tree = Element::new_tree_with_flags(maybe_root_key, flag);
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            tree.get_feature_type(parent_tree.tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        tree.insert_subtree_into_batch_operations(
+                            key,
+                            root_tree_hash,
+                            true,
+                            batch_operations,
+                            merk_feature_type,
+                            grove_version,
+                        )
+                    }
+                    #[cfg(feature = "list_mode")]
+                    Element::ListTree(_, flag) => {
+                        let tree = Element::new_list_tree_with_flags(maybe_root_key, flag);
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            tree.get_feature_type(parent_tree.tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        tree.insert_subtree_into_batch_operations(
+                            key,
+                            root_tree_hash,
+                            true,
+                            batch_operations,
+                            merk_feature_type,
+                            grove_version,
+                        )
+                    }
+                    Element::SumTree(.., flag) => {
+                        let tree = Element::new_sum_tree_with_flags_and_sum_value(
+                            maybe_root_key,
+                            aggregate_data.as_sum_i64(),
+                            flag,
+                        );
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            tree.get_feature_type(parent_tree.tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        tree.insert_subtree_into_batch_operations(
+                            key,
+                            root_tree_hash,
+                            true,
+                            batch_operations,
+                            merk_feature_type,
+                            grove_version,
+                        )
+                    }
+                    Element::BigSumTree(.., flag) => {
+                        let tree = Element::new_big_sum_tree_with_flags_and_sum_value(
+                            maybe_root_key,
+                            aggregate_data.as_summed_i128(),
+                            flag,
+                        );
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            tree.get_feature_type(parent_tree.tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        tree.insert_subtree_into_batch_operations(
+                            key,
+                            root_tree_hash,
+                            true,
+                            batch_operations,
+                            merk_feature_type,
+                            grove_version,
+                        )
+                    }
+                    Element::CountTree(.., flag) => {
+                        let tree = Element::new_count_tree_with_flags_and_count_value(
+                            maybe_root_key,
+                            aggregate_data.as_count_u64(),
+                            flag,
+                        );
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            tree.get_feature_type(parent_tree.tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        tree.insert_subtree_into_batch_operations(
+                            key,
+                            root_tree_hash,
+                            true,
+                            batch_operations,
+                            merk_feature_type,
+                            grove_version,
+                        )
+                    }
+                    Element::CountSumTree(.., flag) => {
+                        let tree = Element::new_count_sum_tree_with_flags_and_sum_and_count_value(
+                            maybe_root_key,
+                            aggregate_data.as_count_u64(),
+                            aggregate_data.as_sum_i64(),
+                            flag,
+                        );
+                        let merk_feature_type = cost_return_on_error!(
+                            &mut cost,
+                            tree.get_feature_type(parent_tree.tree_type)
+                                .wrap_with_cost(OperationCost::default())
+                        );
+                        tree.insert_subtree_into_batch_operations(
+                            key,
+                            root_tree_hash,
+                            true,
+                            batch_operations,
+                            merk_feature_type,
+                            grove_version,
+                        )
+                    }
+                    _ => Err(Error::InvalidPath(
                         "can only propagate on tree items".to_owned(),
                     ))
-                    .wrap_with_cost(Default::default())
+                    .wrap_with_cost(Default::default()),
                 }
             },
         )
@@ -1017,6 +1052,54 @@ impl GroveDb {
                 | Element::BigSumTree(..)
                 | Element::CountTree(..)
                 | Element::CountSumTree(..) => {
+                    let (kv_value, element_value_hash) = merk
+                        .get_value_and_value_hash(
+                            &key,
+                            allow_cache,
+                            None::<&fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
+                            grove_version,
+                        )
+                        .unwrap()
+                        .map_err(MerkError)?
+                        .ok_or(Error::CorruptedData(format!(
+                            "expected merk to contain value at key {} for {}",
+                            hex_to_ascii(&key),
+                            element.type_str()
+                        )))?;
+                    let new_path = path.derive_owned_with_child(key);
+                    let new_path_ref = SubtreePath::from(&new_path);
+
+                    let inner_merk = self
+                        .open_transactional_merk_at_path(
+                            new_path_ref.clone(),
+                            transaction,
+                            batch,
+                            grove_version,
+                        )
+                        .unwrap()?;
+                    let root_hash = inner_merk.root_hash().unwrap();
+
+                    let actual_value_hash = value_hash(&kv_value).unwrap();
+                    let combined_value_hash = combine_hash(&actual_value_hash, &root_hash).unwrap();
+
+                    if combined_value_hash != element_value_hash {
+                        issues.insert(
+                            new_path.to_vec(),
+                            (root_hash, combined_value_hash, element_value_hash),
+                        );
+                    }
+                    issues.extend(self.verify_merk_and_submerks_in_transaction(
+                        inner_merk,
+                        &new_path_ref,
+                        batch,
+                        transaction,
+                        verify_references,
+                        true,
+                        grove_version,
+                    )?);
+                }
+                #[cfg(feature = "list_mode")]
+                Element::ListTree(..) => {
                     let (kv_value, element_value_hash) = merk
                         .get_value_and_value_hash(
                             &key,

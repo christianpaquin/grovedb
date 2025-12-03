@@ -226,6 +226,21 @@ impl Element {
                         NodeType::NormalNode,
                     ) as u64
             }
+            #[cfg(feature = "list_mode")]
+            Some(Element::ListTree(_, flags)) => {
+                let tree_cost_size = element.as_ref().unwrap().tree_type().unwrap().cost_size();
+                let flags_len = flags.as_ref().map_or(0, |flags| {
+                    let flags_len = flags.len() as u32;
+                    flags_len + flags_len.required_space() as u32
+                });
+                let value_len = tree_cost_size + flags_len;
+                cost.storage_loaded_bytes =
+                    KV::layered_value_byte_cost_size_for_key_and_value_lengths(
+                        key_ref.len() as u32,
+                        value_len,
+                        NodeType::NormalNode,
+                    ) as u64
+            }
             None => {}
         }
         Ok(element).wrap_with_cost(cost)
@@ -295,6 +310,21 @@ impl Element {
             | Element::BigSumTree(_, _, flags)
             | Element::CountTree(_, _, flags)
             | Element::CountSumTree(.., flags) => {
+                let tree_cost_size = element.tree_type().unwrap().cost_size();
+                let flags_len = flags.as_ref().map_or(0, |flags| {
+                    let flags_len = flags.len() as u32;
+                    flags_len + flags_len.required_space() as u32
+                });
+                let value_len = tree_cost_size + flags_len;
+                cost.storage_loaded_bytes =
+                    KV::layered_value_byte_cost_size_for_key_and_value_lengths(
+                        key_ref.len() as u32,
+                        value_len,
+                        node_type,
+                    ) as u64
+            }
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => {
                 let tree_cost_size = element.tree_type().unwrap().cost_size();
                 let flags_len = flags.as_ref().map_or(0, |flags| {
                     let flags_len = flags.len() as u32;

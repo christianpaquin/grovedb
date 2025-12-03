@@ -89,6 +89,17 @@ impl Visualize for Element {
                     }
                 }
             }
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(root_key, flags) => {
+                drawer.write(b"list_tree: ")?;
+                drawer = root_key.as_deref().visualize(drawer)?;
+
+                if let Some(f) = flags {
+                    if !f.is_empty() {
+                        drawer = f.visualize(drawer)?;
+                    }
+                }
+            }
             Element::SumTree(root_key, value, flags) => {
                 drawer.write(b"sum_tree: ")?;
                 drawer = root_key.as_deref().visualize(drawer)?;

@@ -459,6 +459,78 @@ impl GroveDb {
                                     }
                                 }
                             }
+                            #[cfg(feature = "list_mode")]
+                            Element::ListTree(Some(_), _) => {
+                                path.push(key);
+                                *last_parent_tree_type = element.tree_feature_type();
+                                if query.query_items_at_path(&path, grove_version)?.is_none() {
+                                    let path_key_optional_value =
+                                        ProvedPathKeyOptionalValue::from_proved_key_value(
+                                            path.iter().map(|p| p.to_vec()).collect(),
+                                            proved_key_value,
+                                        );
+                                    #[cfg(feature = "proof_debug")]
+                                    {
+                                        println!(
+                                            "pushing {} limit left after is {:?}",
+                                            &path_key_optional_value, limit_left
+                                        );
+                                    }
+                                    result.push(
+                                        path_key_optional_value
+                                            .try_into_versioned(grove_version)?,
+                                    );
+
+                                    limit_left.iter_mut().for_each(|limit| *limit -= 1);
+                                    if limit_left == &Some(0) {
+                                        break;
+                                    }
+                                } else {
+                                    if query.should_add_parent_tree_at_path(
+                                        current_path,
+                                        grove_version,
+                                    )? {
+                                        let path_key_optional_value =
+                                            ProvedPathKeyOptionalValue::from_proved_key_value(
+                                                path.iter().map(|p| p.to_vec()).collect(),
+                                                proved_key_value.clone(),
+                                            );
+
+                                        result.push(
+                                            path_key_optional_value
+                                                .try_into_versioned(grove_version)?,
+                                        );
+                                    }
+                                    let lower_hash = Self::verify_layer_proof(
+                                        lower_layer,
+                                        prove_options,
+                                        query,
+                                        limit_left,
+                                        &path,
+                                        result,
+                                        last_parent_tree_type,
+                                        options,
+                                        grove_version,
+                                    )?;
+                                    let combined_root_hash =
+                                        combine_hash(value_hash(value_bytes).value(), &lower_hash)
+                                            .value()
+                                            .to_owned();
+                                    if hash != &combined_root_hash {
+                                        return Err(Error::InvalidProof(
+                                            query.clone(),
+                                            format!(
+                                                "Mismatch in lower layer hash, expected {}, got {}",
+                                                hex::encode(hash),
+                                                hex::encode(combined_root_hash)
+                                            ),
+                                        ));
+                                    }
+                                    if limit_left == &Some(0) {
+                                        break;
+                                    }
+                                }
+                            }
                             Element::Tree(None, _)
                             | Element::SumTree(None, ..)
                             | Element::BigSumTree(None, ..)
@@ -472,39 +544,61 @@ impl GroveDb {
                                     "Proof has lower layer for a non Tree.".to_string(),
                                 ));
                             }
-                        }
-                    } else if element.is_any_item()
-                        || !internal_query.has_subquery_or_matching_in_path_on_key(key)
-                            && (options.include_empty_trees_in_result
-                                || !matches!(element, Element::Tree(None, _)))
-                    {
-                        let path_key_optional_value =
-                            ProvedPathKeyOptionalValue::from_proved_key_value(
-                                path.iter().map(|p| p.to_vec()).collect(),
-                                proved_key_value,
-                            );
-                        #[cfg(feature = "proof_debug")]
-                        {
-                            println!(
-                                "pushing {} limit left after is {:?}",
-                                &path_key_optional_value, limit_left
-                            );
-                        }
-                        result.push(path_key_optional_value.try_into_versioned(grove_version)?);
-
-                        limit_left.iter_mut().for_each(|limit| *limit -= 1);
-                        if limit_left == &Some(0) {
-                            break;
+                            #[cfg(feature = "list_mode")]
+                            Element::ListTree(None, _) => {
+                                return Err(Error::InvalidProof(
+                                    query.clone(),
+                                    "Proof has lower layer for a non Tree.".to_string(),
+                                ));
+                            }
                         }
                     } else {
-                        #[cfg(feature = "proof_debug")]
-                        {
-                            println!(
-                                "we have subquery on key {} with value {}: {}",
-                                hex_to_ascii(key),
-                                element,
-                                level_query
-                            )
+                        let is_empty_tree = {
+                            let base = matches!(element, Element::Tree(None, _));
+                            #[cfg(feature = "list_mode")]
+                            {
+                                base || matches!(element, Element::ListTree(None, _))
+                            }
+                            #[cfg(not(feature = "list_mode"))]
+                            {
+                                base
+                            }
+                        };
+
+                        let allow_element = element.is_any_item()
+                            || !internal_query.has_subquery_or_matching_in_path_on_key(key)
+                                && (options.include_empty_trees_in_result || !is_empty_tree);
+
+                        if allow_element {
+                            let path_key_optional_value =
+                                ProvedPathKeyOptionalValue::from_proved_key_value(
+                                    path.iter().map(|p| p.to_vec()).collect(),
+                                    proved_key_value,
+                                );
+                            #[cfg(feature = "proof_debug")]
+                            {
+                                println!(
+                                    "pushing {} limit left after is {:?}",
+                                    &path_key_optional_value, limit_left
+                                );
+                            }
+                            result
+                                .push(path_key_optional_value.try_into_versioned(grove_version)?);
+
+                            limit_left.iter_mut().for_each(|limit| *limit -= 1);
+                            if limit_left == &Some(0) {
+                                break;
+                            }
+                        } else {
+                            #[cfg(feature = "proof_debug")]
+                            {
+                                println!(
+                                    "we have subquery on key {} with value {}: {}",
+                                    hex_to_ascii(key),
+                                    element,
+                                    level_query
+                                )
+                            }
                         }
                     }
                 }

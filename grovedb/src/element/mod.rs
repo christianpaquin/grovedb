@@ -141,6 +141,9 @@ pub enum Element {
     CountTree(Option<Vec<u8>>, CountValue, Option<ElementFlags>),
     /// Combines Element::SumTree and Element::CountTree
     CountSumTree(Option<Vec<u8>>, CountValue, SumValue, Option<ElementFlags>),
+    #[cfg(feature = "list_mode")]
+    /// A list-mode subtree backed by positional Merk operations
+    ListTree(Option<Vec<u8>>, Option<ElementFlags>),
 }
 
 impl fmt::Display for Element {
@@ -171,6 +174,17 @@ impl fmt::Display for Element {
                 write!(
                     f,
                     "Tree({}{})",
+                    root_key.as_ref().map_or("None".to_string(), hex::encode),
+                    flags
+                        .as_ref()
+                        .map_or(String::new(), |f| format!(", flags: {:?}", f))
+                )
+            }
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(root_key, flags) => {
+                write!(
+                    f,
+                    "ListTree({}{})",
                     root_key.as_ref().map_or("None".to_string(), hex::encode),
                     flags
                         .as_ref()
@@ -242,6 +256,8 @@ impl Element {
             Element::Item(..) => "item",
             Element::Reference(..) => "reference",
             Element::Tree(..) => "tree",
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => "list tree",
             Element::SumItem(..) => "sum item",
             Element::SumTree(..) => "sum tree",
             Element::BigSumTree(..) => "big sum tree",

@@ -159,6 +159,8 @@ impl Element {
     pub fn root_key_and_tree_type_owned(self) -> Option<(Option<Vec<u8>>, TreeType)> {
         match self {
             Element::Tree(root_key, _) => Some((root_key, TreeType::NormalTree)),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(root_key, _) => Some((root_key, TreeType::ListTree)),
             Element::SumTree(root_key, ..) => Some((root_key, TreeType::SumTree)),
             Element::BigSumTree(root_key, ..) => Some((root_key, TreeType::BigSumTree)),
             Element::CountTree(root_key, ..) => Some((root_key, TreeType::CountTree)),
@@ -173,6 +175,8 @@ impl Element {
     pub fn root_key_and_tree_type(&self) -> Option<(&Option<Vec<u8>>, TreeType)> {
         match self {
             Element::Tree(root_key, _) => Some((root_key, TreeType::NormalTree)),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(root_key, _) => Some((root_key, TreeType::ListTree)),
             Element::SumTree(root_key, ..) => Some((root_key, TreeType::SumTree)),
             Element::BigSumTree(root_key, ..) => Some((root_key, TreeType::BigSumTree)),
             Element::CountTree(root_key, ..) => Some((root_key, TreeType::CountTree)),
@@ -186,6 +190,8 @@ impl Element {
     pub fn tree_flags_and_type(&self) -> Option<(&Option<ElementFlags>, TreeType)> {
         match self {
             Element::Tree(_, flags) => Some((flags, TreeType::NormalTree)),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => Some((flags, TreeType::ListTree)),
             Element::SumTree(_, _, flags) => Some((flags, TreeType::SumTree)),
             Element::BigSumTree(_, _, flags) => Some((flags, TreeType::BigSumTree)),
             Element::CountTree(_, _, flags) => Some((flags, TreeType::CountTree)),
@@ -199,6 +205,8 @@ impl Element {
     pub fn tree_type(&self) -> Option<TreeType> {
         match self {
             Element::Tree(..) => Some(TreeType::NormalTree),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => Some(TreeType::ListTree),
             Element::SumTree(..) => Some(TreeType::SumTree),
             Element::BigSumTree(..) => Some(TreeType::BigSumTree),
             Element::CountTree(..) => Some(TreeType::CountTree),
@@ -213,6 +221,8 @@ impl Element {
     pub fn tree_feature_type(&self) -> Option<TreeFeatureType> {
         match self {
             Element::Tree(..) => Some(BasicMerkNode),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => Some(BasicMerkNode),
             Element::SumTree(_, value, _) => Some(SummedMerkNode(*value)),
             Element::BigSumTree(_, value, _) => Some(BigSummedMerkNode(*value)),
             Element::CountTree(_, value, _) => Some(CountedMerkNode(*value)),
@@ -226,6 +236,8 @@ impl Element {
     pub fn maybe_tree_type(&self) -> MaybeTree {
         match self {
             Element::Tree(..) => MaybeTree::Tree(TreeType::NormalTree),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => MaybeTree::Tree(TreeType::ListTree),
             Element::SumTree(..) => MaybeTree::Tree(TreeType::SumTree),
             Element::BigSumTree(..) => MaybeTree::Tree(TreeType::BigSumTree),
             Element::CountTree(..) => MaybeTree::Tree(TreeType::CountTree),
@@ -243,20 +255,27 @@ impl Element {
     #[cfg(any(feature = "minimal", feature = "verify"))]
     /// Check if the element is a tree but not a sum tree
     pub fn is_basic_tree(&self) -> bool {
-        matches!(self, Element::Tree(..))
+        match self {
+            Element::Tree(..) => true,
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => true,
+            _ => false,
+        }
     }
 
     #[cfg(any(feature = "minimal", feature = "verify"))]
     /// Check if the element is a tree
     pub fn is_any_tree(&self) -> bool {
-        matches!(
-            self,
-            Element::SumTree(..)
-                | Element::Tree(..)
-                | Element::BigSumTree(..)
-                | Element::CountTree(..)
-                | Element::CountSumTree(..)
-        )
+        match self {
+            Element::Tree(..)
+            | Element::SumTree(..)
+            | Element::BigSumTree(..)
+            | Element::CountTree(..)
+            | Element::CountSumTree(..) => true,
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => true,
+            _ => false,
+        }
     }
 
     #[cfg(any(feature = "minimal", feature = "verify"))]
@@ -305,14 +324,16 @@ impl Element {
     /// Grab the optional flag stored in an element
     pub fn get_flags(&self) -> &Option<ElementFlags> {
         match self {
-            Element::Tree(_, flags)
-            | Element::Item(_, flags)
-            | Element::Reference(_, _, flags)
-            | Element::SumTree(.., flags)
-            | Element::BigSumTree(.., flags)
-            | Element::CountTree(.., flags)
-            | Element::SumItem(_, flags)
-            | Element::CountSumTree(.., flags) => flags,
+            Element::Tree(_, flags) => flags,
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => flags,
+            Element::Item(_, flags) => flags,
+            Element::Reference(_, _, flags) => flags,
+            Element::SumTree(.., flags) => flags,
+            Element::BigSumTree(.., flags) => flags,
+            Element::CountTree(.., flags) => flags,
+            Element::SumItem(_, flags) => flags,
+            Element::CountSumTree(.., flags) => flags,
         }
     }
 
@@ -320,14 +341,16 @@ impl Element {
     /// Grab the optional flag stored in an element
     pub fn get_flags_owned(self) -> Option<ElementFlags> {
         match self {
-            Element::Tree(_, flags)
-            | Element::Item(_, flags)
-            | Element::Reference(_, _, flags)
-            | Element::SumTree(.., flags)
-            | Element::BigSumTree(.., flags)
-            | Element::CountTree(.., flags)
-            | Element::SumItem(_, flags)
-            | Element::CountSumTree(.., flags) => flags,
+            Element::Tree(_, flags) => flags,
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => flags,
+            Element::Item(_, flags) => flags,
+            Element::Reference(_, _, flags) => flags,
+            Element::SumTree(.., flags) => flags,
+            Element::BigSumTree(.., flags) => flags,
+            Element::CountTree(.., flags) => flags,
+            Element::SumItem(_, flags) => flags,
+            Element::CountSumTree(.., flags) => flags,
         }
     }
 
@@ -335,14 +358,16 @@ impl Element {
     /// Grab the optional flag stored in an element as mutable
     pub fn get_flags_mut(&mut self) -> &mut Option<ElementFlags> {
         match self {
-            Element::Tree(_, flags)
-            | Element::Item(_, flags)
-            | Element::Reference(_, _, flags)
-            | Element::SumTree(.., flags)
-            | Element::BigSumTree(.., flags)
-            | Element::CountTree(.., flags)
-            | Element::SumItem(_, flags)
-            | Element::CountSumTree(.., flags) => flags,
+            Element::Tree(_, flags) => flags,
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => flags,
+            Element::Item(_, flags) => flags,
+            Element::Reference(_, _, flags) => flags,
+            Element::SumTree(.., flags) => flags,
+            Element::BigSumTree(.., flags) => flags,
+            Element::CountTree(.., flags) => flags,
+            Element::SumItem(_, flags) => flags,
+            Element::CountSumTree(.., flags) => flags,
         }
     }
 
@@ -350,14 +375,16 @@ impl Element {
     /// Sets the optional flag stored in an element
     pub fn set_flags(&mut self, new_flags: Option<ElementFlags>) {
         match self {
-            Element::Tree(_, flags)
-            | Element::Item(_, flags)
-            | Element::Reference(_, _, flags)
-            | Element::SumTree(.., flags)
-            | Element::BigSumTree(.., flags)
-            | Element::CountTree(.., flags)
-            | Element::SumItem(_, flags)
-            | Element::CountSumTree(.., flags) => *flags = new_flags,
+            Element::Tree(_, flags) => *flags = new_flags,
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => *flags = new_flags,
+            Element::Item(_, flags) => *flags = new_flags,
+            Element::Reference(_, _, flags) => *flags = new_flags,
+            Element::SumTree(.., flags) => *flags = new_flags,
+            Element::BigSumTree(.., flags) => *flags = new_flags,
+            Element::CountTree(.., flags) => *flags = new_flags,
+            Element::SumItem(_, flags) => *flags = new_flags,
+            Element::CountSumTree(.., flags) => *flags = new_flags,
         }
     }
 
@@ -435,6 +462,18 @@ impl Element {
                     key_len, value_len, node_type,
                 )
             }
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(_, flags) => {
+                let flags_len = flags.map_or(0, |flags| {
+                    let flags_len = flags.len() as u32;
+                    flags_len + flags_len.required_space() as u32
+                });
+                let value_len = TREE_COST_SIZE + flags_len;
+                let key_len = key.len() as u32;
+                KV::layered_value_byte_cost_size_for_key_and_value_lengths(
+                    key_len, value_len, node_type,
+                )
+            }
             Element::SumTree(_, _sum_value, flags) => {
                 let flags_len = flags.map_or(0, |flags| {
                     let flags_len = flags.len() as u32;
@@ -502,6 +541,8 @@ impl Element {
         );
         match self {
             Element::Tree(..) => Ok(TREE_COST_SIZE),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => Ok(TREE_COST_SIZE),
             Element::SumTree(..) => Ok(SUM_TREE_COST_SIZE),
             Element::BigSumTree(..) => Ok(BIG_SUM_TREE_COST_SIZE),
             Element::SumItem(..) => Ok(SUM_ITEM_COST_SIZE),
@@ -525,6 +566,8 @@ impl Element {
             });
         match self {
             Element::Tree(..) => Some(LayeredValueDefinedCost(cost)),
+            #[cfg(feature = "list_mode")]
+            Element::ListTree(..) => Some(LayeredValueDefinedCost(cost)),
             Element::SumTree(..) => Some(LayeredValueDefinedCost(cost)),
             Element::BigSumTree(..) => Some(LayeredValueDefinedCost(cost)),
             Element::CountTree(..) => Some(LayeredValueDefinedCost(cost)),

@@ -323,15 +323,12 @@ impl GroveDb {
         let mut cost = OperationCost::default();
         let key_len = key.max_length() as u32;
         match value {
-            Element::Tree(_, flags)
-            | Element::SumTree(_, _, flags)
-            | Element::BigSumTree(_, _, flags)
-            | Element::CountTree(_, _, flags) => {
-                let flags_len = flags.as_ref().map_or(0, |flags| {
+            element if element.is_any_tree() => {
+                let flags_len = element.get_flags().as_ref().map_or(0, |flags| {
                     let flags_len = flags.len() as u32;
                     flags_len + flags_len.required_space() as u32
                 });
-                let tree_cost_size = value.tree_type().unwrap().cost_size();
+                let tree_cost_size = element.tree_type().unwrap().cost_size();
                 let value_len = tree_cost_size + flags_len;
                 add_cost_case_merk_replace_layered(&mut cost, key_len, value_len, in_tree_type)
             }
