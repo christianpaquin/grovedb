@@ -290,8 +290,17 @@ impl GroveDb {
         Ok(())
     }
 
-    /// Opens the transactional Merk at the given path. Returns CostResult.
-    fn open_transactional_merk_at_path<'db, 'b, B>(
+    /// Opens the transactional Merk at the given path.
+    ///
+    /// This is the supported way for downstream crates to access child Merks
+    /// (list trees, sum trees, etc.) within the scope of an existing RocksDB
+    /// transaction. The `path` must point to an element backed by a Merk tree
+    /// and GroveDB will preserve that element's tree type when opening it.
+    /// Provide the in-flight `batch` when the caller already staged writes, or
+    /// pass `None` to obtain direct access. Callers remain responsible for
+    /// committing their updates (via `Merk::commit` or higher-level GroveDB
+    /// APIs) before the surrounding transaction is finalized.
+    pub fn open_transactional_merk_at_path<'db, 'b, B>(
         &'db self,
         path: SubtreePath<'b, B>,
         tx: &'db Transaction,
@@ -327,6 +336,58 @@ impl GroveDb {
         }
 
         compat::open_merk::<_, Compat>(&self.db, path, tx, batch, grove_version)
+    }
+
+    #[cfg(feature = "list_mode")]
+    /// Convenience helper that opens a list-mode Merk under the provided path.
+    ///
+    /// The function validates that the target element is a `ListTree` and then
+    /// delegates to [`open_transactional_merk_at_path`] with `batch = None`.
+    /// Downstream crates can rely on this to obtain positional Merks while
+    /// sharing the current transaction context.
+    pub fn open_list_merk<'db>(
+        &'db self,
+        path: &[Vec<u8>],
+        tx: &'db Transaction<'db>,
+        grove_version: &GroveVersion,
+    ) -> CostResult<Merk<PrefixedRocksDbTransactionContext<'db>>, Error> {
+        let mut cost = OperationCost::default();
+        let subtree_path: SubtreePath<_> = SubtreePath::from(path);
+
+        let (parent_path, parent_key) = match subtree_path.derive_parent() {
+            Some(parent) => parent,
+            None => {
+                return Err(Error::InvalidPath(
+                    "cannot open root path as a list Merk".to_owned(),
+                ))
+                .wrap_with_cost(cost);
+            }
+        };
+
+        let parent_tree = cost_return_on_error!(
+            &mut cost,
+            self.open_transactional_merk_at_path(parent_path.clone(), tx, None, grove_version)
+        );
+
+        let element = cost_return_on_error!(
+            &mut cost,
+            Self::get_element_from_subtree(&parent_tree, parent_key, grove_version)
+        );
+
+        match element {
+            Element::ListTree(_, _) => {
+                drop(parent_tree);
+                let merk = cost_return_on_error!(
+                    &mut cost,
+                    self.open_transactional_merk_at_path(subtree_path, tx, None, grove_version)
+                );
+                Ok(merk).wrap_with_cost(cost)
+            }
+            _ => Err(Error::InvalidPath(
+                "path does not point to a list-mode subtree".to_owned(),
+            ))
+            .wrap_with_cost(cost),
+        }
     }
 
     fn open_transactional_merk_by_prefix<'db>(
