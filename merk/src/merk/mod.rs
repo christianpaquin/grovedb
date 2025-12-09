@@ -956,6 +956,79 @@ where
         }
         position
     }
+
+    #[cfg(all(feature = "full", feature = "list_mode"))]
+    /// Ensure the entire list tree is fully materialized in memory so that
+    /// subtree_size metadata can be queried without triggering missing-child
+    /// errors during positional traversals.
+    pub fn ensure_list_tree_materialized(
+        &self,
+        grove_version: &GroveVersion,
+    ) -> CostResult<(), Error> {
+        let mut cost = OperationCost::default();
+
+        let maybe_tree = self.tree.take();
+        if let Some(tree) = maybe_tree {
+            let needs_full_load =
+                tree.link(true).map_or(false, |l| l.is_reference()) ||
+                tree.link(false).map_or(false, |l| l.is_reference());
+
+            if needs_full_load {
+                let loaded = match load_tree_recursively(tree, &self.storage, grove_version)
+                    .unwrap_add_cost(&mut cost)
+                {
+                    Ok(tree) => tree,
+                    Err(e) => return Err(e).wrap_with_cost(cost),
+                };
+                self.tree.set(Some(loaded));
+            } else {
+                self.tree.set(Some(tree));
+            }
+
+            return Ok(()).wrap_with_cost(cost);
+        }
+
+        let mut root_key_opt = cost_return_on_error!(
+            &mut cost,
+            self.storage.get_root(ROOT_KEY_KEY).map_err(Error::StorageError)
+        );
+
+        if root_key_opt.is_none() && self.merk_type == MerkType::LayeredMerk {
+            let cached = self.root_tree_key.take();
+            if let Some(ref key_bytes) = cached {
+                self.root_tree_key.set(Some(key_bytes.clone()));
+            }
+            root_key_opt = cached;
+        }
+
+        if let Some(root_key) = root_key_opt {
+            let root_tree = cost_return_on_error!(
+                &mut cost,
+                TreeNode::get(
+                    &self.storage,
+                    root_key.clone(),
+                    None::<fn(&[u8], &GroveVersion) -> Option<ValueDefinedCostType>>,
+                    grove_version
+                )
+            );
+
+            if let Some(root) = root_tree {
+                let loaded = match load_tree_recursively(root, &self.storage, grove_version)
+                    .unwrap_add_cost(&mut cost)
+                {
+                    Ok(tree) => tree,
+                    Err(e) => return Err(e).wrap_with_cost(cost),
+                };
+                self.tree.set(Some(loaded));
+            } else {
+                self.tree.set(None);
+            }
+        } else {
+            self.tree.set(None);
+        }
+
+        Ok(()).wrap_with_cost(cost)
+    }
 }
 
 #[cfg(test)]
