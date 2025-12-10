@@ -390,6 +390,88 @@ impl GroveDb {
         }
     }
 
+    /// Public helper to open a Merk at the given path within a transaction.
+    pub fn open_merk_at_path<'db, 'b, B>(
+        &'db self,
+        path: SubtreePath<'b, B>,
+        tx: &'db Transaction,
+        grove_version: &GroveVersion,
+    ) -> CostResult<Merk<PrefixedRocksDbTransactionContext<'db>>, Error>
+    where
+        B: AsRef<[u8]> + 'b,
+    {
+        self.open_transactional_merk_at_path(path, tx, None, grove_version)
+    }
+
+    /// Opens a Merk at the given path with write support by attaching the provided storage batch.
+    pub fn open_writable_merk_at_path<'db, 'b, B>(
+        &'db self,
+        path: SubtreePath<'b, B>,
+        tx: &'db Transaction,
+        batch: &'db StorageBatch,
+        grove_version: &GroveVersion,
+    ) -> CostResult<Merk<PrefixedRocksDbTransactionContext<'db>>, Error>
+    where
+        B: AsRef<[u8]> + 'b,
+    {
+        self.open_transactional_merk_at_path(path, tx, Some(batch), grove_version)
+    }
+
+    /// Propagate a modified Merk tree at `path` through its ancestors inside a transaction.
+    pub fn propagate_transactional_merk<'db, 'b, B>(
+        &'db self,
+        path: SubtreePath<'b, B>,
+        merk: Merk<PrefixedRocksDbTransactionContext<'db>>,
+        tx: &'db Transaction,
+        grove_version: &GroveVersion,
+    ) -> CostResult<(), Error>
+    where
+        B: AsRef<[u8]> + 'b,
+    {
+        let storage_batch = StorageBatch::new();
+        self.propagate_transactional_merk_with_batch(
+            path,
+            merk,
+            tx,
+            storage_batch,
+            grove_version,
+        )
+    }
+
+    /// Propagate a modified Merk tree using an existing storage batch.
+    pub fn propagate_transactional_merk_with_batch<'db, 'b, B>(
+        &'db self,
+        path: SubtreePath<'b, B>,
+        merk: Merk<PrefixedRocksDbTransactionContext<'db>>,
+        tx: &'db Transaction,
+        mut storage_batch: StorageBatch,
+        grove_version: &GroveVersion,
+    ) -> CostResult<(), Error>
+    where
+        B: AsRef<[u8]> + 'b,
+    {
+        let mut cost = OperationCost::default();
+        let mut merk_cache = HashMap::new();
+        merk_cache.insert(path.clone(), merk);
+        cost_return_on_error!(
+            &mut cost,
+            self.propagate_changes_with_transaction(
+                merk_cache,
+                path,
+                tx,
+                &storage_batch,
+                grove_version
+            )
+        );
+        cost_return_on_error!(
+            &mut cost,
+            self.db
+                .commit_multi_context_batch(storage_batch, Some(tx))
+                .map_err(Into::into)
+        );
+        Ok(()).wrap_with_cost(cost)
+    }
+
     fn open_transactional_merk_by_prefix<'db>(
         &'db self,
         prefix: SubtreePrefix,

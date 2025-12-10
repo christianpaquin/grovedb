@@ -790,10 +790,10 @@ where
 /// insert_at_position and delete_at_position.
 #[cfg(all(feature = "full", feature = "list_mode"))]
 fn load_tree_recursively<'db>(
-    mut tree: TreeNode,
+    tree: &mut TreeNode,
     db: &impl StorageContext<'db>,
     grove_version: &GroveVersion,
-) -> CostResult<TreeNode, Error> {
+) -> CostResult<(), Error> {
     let mut cost = OperationCost::default();
 
     // Load left child if it's a reference
@@ -821,17 +821,17 @@ fn load_tree_recursively<'db>(
                 Err(e) => return Err(e).wrap_with_cost(cost),
             };
 
-            if let Some(child) = child_tree {
+            if let Some(mut child) = child_tree {
                 // Recursively load the child's children
-                let loaded_child = cost_return_on_error!(
+                cost_return_on_error!(
                     &mut cost,
-                    load_tree_recursively(child, db, grove_version)
+                    load_tree_recursively(&mut child, db, grove_version)
                 );
                 // Replace the reference with the loaded tree
                 *tree.slot_mut(true) = Some(Link::Loaded {
                     hash,
                     child_heights,
-                    tree: loaded_child,
+                    tree: child,
                     aggregate_data,
                 });
             }
@@ -863,24 +863,24 @@ fn load_tree_recursively<'db>(
                 Err(e) => return Err(e).wrap_with_cost(cost),
             };
 
-            if let Some(child) = child_tree {
+            if let Some(mut child) = child_tree {
                 // Recursively load the child's children
-                let loaded_child = cost_return_on_error!(
+                cost_return_on_error!(
                     &mut cost,
-                    load_tree_recursively(child, db, grove_version)
+                    load_tree_recursively(&mut child, db, grove_version)
                 );
                 // Replace the reference with the loaded tree
                 *tree.slot_mut(false) = Some(Link::Loaded {
                     hash,
                     child_heights,
-                    tree: loaded_child,
+                    tree: child,
                     aggregate_data,
                 });
             }
         }
     }
 
-    Ok(tree).wrap_with_cost(cost)
+    Ok(()).wrap_with_cost(cost)
 }
 
 fn fetch_node<'db>(
@@ -940,6 +940,39 @@ where
     #[cfg(feature = "list_mode")]
     fn invalidate_key_cache(&self) {
         self.key_cache.borrow_mut().clear();
+    }
+
+    /// Ensure that a reopened list tree has all children materialized so positional
+    /// traversals can rely on loaded links.
+    #[cfg(all(feature = "full", feature = "list_mode"))]
+    pub fn ensure_list_tree_materialized(
+        &mut self,
+        grove_version: &GroveVersion,
+    ) -> CostResult<(), Error> {
+        let mut cost = OperationCost::default();
+
+        if self.tree_type != TreeType::ListTree {
+            return Ok(()).wrap_with_cost(cost);
+        }
+
+        let mut maybe_tree = self.tree.take();
+        if let Some(mut tree) = maybe_tree.take() {
+            let result_with_cost =
+                load_tree_recursively(&mut tree, &self.storage, grove_version);
+            let result = result_with_cost.unwrap_add_cost(&mut cost);
+            match result {
+                Ok(()) => {
+                    maybe_tree = Some(tree);
+                }
+                Err(e) => {
+                    self.tree.set(Some(tree));
+                    return Err(e).wrap_with_cost(cost);
+                }
+            }
+        }
+        self.tree.set(maybe_tree);
+
+        Ok(()).wrap_with_cost(cost)
     }
 
     /// Determine the position for `key` using the in-memory tree metadata.

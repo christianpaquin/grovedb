@@ -307,7 +307,7 @@ where
 
         // Get current tree or create empty list tree
         let (old_root_key, tree) = match self.tree.take() {
-            Some(tree) => {
+            Some(mut tree) => {
                 // Tree is loaded, but might be lazy-loaded (only root loaded, children are Link::Reference)
                 // Phase 5C: Check if we need to recursively load Link::Reference children
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
@@ -315,17 +315,15 @@ where
 
                 if needs_full_load {
                     // Recursively load the full tree from storage
-                    let loaded_tree = cost_return_on_error!(
+                    cost_return_on_error!(
                         &mut cost,
-                        super::load_tree_recursively(tree, &self.storage, grove_version)
+                        super::load_tree_recursively(&mut tree, &self.storage, grove_version)
                     );
-                    let old_key = loaded_tree.key().to_vec();
-                    (Some(old_key), loaded_tree)
-                } else {
-                    // Tree is fully loaded in memory
-                    let old_key = tree.key().to_vec();
-                    (Some(old_key), tree)
                 }
+
+                // Tree is now fully loaded in memory
+                let old_key = tree.key().to_vec();
+                (Some(old_key), tree)
             }
             None => {
                 // Tree not loaded - check if root exists in storage
@@ -348,15 +346,15 @@ where
                         )
                     );
 
-                    if let Some(root) = root_tree {
+                    if let Some(mut root) = root_tree {
                         // Phase 5C: Recursively load the full tree from storage
                         // This converts all Link::Reference children to Link::Loaded
-                        let loaded_tree = cost_return_on_error!(
+                        cost_return_on_error!(
                             &mut cost,
-                            super::load_tree_recursively(root, &self.storage, grove_version)
+                            super::load_tree_recursively(&mut root, &self.storage, grove_version)
                         );
-                        let old_key = loaded_tree.key().to_vec();
-                        (Some(old_key), loaded_tree)
+                        let old_key = root.key().to_vec();
+                        (Some(old_key), root)
                     } else {
                         return Err(Error::InternalError(
                             "Root key exists but root node not found",
@@ -524,7 +522,7 @@ where
 
         // Get current tree and track old root
         let (old_root_key, tree) = match self.tree.take() {
-            Some(tree) => {
+            Some(mut tree) => {
                 // Tree is loaded, but might be lazy-loaded (only root loaded, children are Link::Reference)
                 // Phase 5C: Check if we need to recursively load Link::Reference children
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
@@ -532,17 +530,15 @@ where
 
                 if needs_full_load {
                     // Recursively load the full tree from storage
-                    let loaded_tree = cost_return_on_error!(
+                    cost_return_on_error!(
                         &mut cost,
-                        super::load_tree_recursively(tree, &self.storage, grove_version)
+                        super::load_tree_recursively(&mut tree, &self.storage, grove_version)
                     );
-                    let old_key = loaded_tree.key().to_vec();
-                    (old_key, loaded_tree)
-                } else {
-                    // Tree is fully loaded in memory
-                    let old_key = tree.key().to_vec();
-                    (old_key, tree)
                 }
+
+                // Tree is fully loaded in memory
+                let old_key = tree.key().to_vec();
+                (old_key, tree)
             }
             None => {
                 // Tree not loaded - check if root exists in storage
@@ -565,14 +561,14 @@ where
                         )
                     );
 
-                    if let Some(root) = root_tree {
+                    if let Some(mut root) = root_tree {
                         // Phase 5C: Recursively load the full tree from storage
-                        let loaded_tree = cost_return_on_error!(
+                        cost_return_on_error!(
                             &mut cost,
-                            super::load_tree_recursively(root, &self.storage, grove_version)
+                            super::load_tree_recursively(&mut root, &self.storage, grove_version)
                         );
-                        let old_key = loaded_tree.key().to_vec();
-                        (old_key, loaded_tree)
+                        let old_key = root.key().to_vec();
+                        (old_key, root)
                     } else {
                         return Err(Error::InternalError(
                             "Root key exists but root node not found",
@@ -856,7 +852,7 @@ where
 
         // Load tree once with full materialization
         let tree = match self.tree.take() {
-            Some(tree) => {
+            Some(mut tree) => {
                 // Tree is loaded, check if it needs full materialization
                 let needs_full_load = tree.link(true).map_or(false, |l| l.is_reference())
                     || tree.link(false).map_or(false, |l| l.is_reference());
@@ -865,20 +861,28 @@ where
                     // Phase 5C: Recursively load the full tree from storage
                     cost_return_on_error!(
                         &mut cost,
-                        super::load_tree_recursively(tree, &self.storage, grove_version)
-                    )
-                } else {
-                    tree
+                        super::load_tree_recursively(&mut tree, &self.storage, grove_version)
+                    );
                 }
+                tree
             }
             None => {
                 // Tree not loaded - check if root exists in storage
-                let root_key_opt = cost_return_on_error!(
+                let mut root_key_opt = cost_return_on_error!(
                     &mut cost,
                     self.storage
                         .get_root(ROOT_KEY_KEY)
                         .map_err(Error::StorageError)
                 );
+
+                if root_key_opt.is_none() && self.merk_type == MerkType::LayeredMerk {
+                    let cached = self.root_tree_key.take();
+                    if let Some(ref key_bytes) = cached {
+                        // Preserve cached value for subsequent loads
+                        self.root_tree_key.set(Some(key_bytes.clone()));
+                    }
+                    root_key_opt = cached;
+                }
 
                 if let Some(root_key) = root_key_opt {
                     // Load root and then full tree
@@ -892,12 +896,13 @@ where
                         )
                     );
 
-                    if let Some(root) = root_tree {
+                    if let Some(mut root) = root_tree {
                         // Recursively load full tree
                         cost_return_on_error!(
                             &mut cost,
-                            super::load_tree_recursively(root, &self.storage, grove_version)
-                        )
+                            super::load_tree_recursively(&mut root, &self.storage, grove_version)
+                        );
+                        root
                     } else {
                         return Err(Error::InternalError(
                             "Root key exists but root node not found",
