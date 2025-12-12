@@ -1,13 +1,13 @@
 use std::collections::LinkedList;
 
-use grovedb_costs::{CostResult, CostsExt};
+use grovedb_costs::{CostResult, CostsExt, OperationCost};
 use grovedb_storage::StorageContext;
 use grovedb_version::version::GroveVersion;
 
 use crate::{
     proofs::{encode_into, query::QueryItem, Op as ProofOp, Query},
     tree::RefWalker,
-    Error, Merk,
+    CryptoHash, Error, Merk,
 };
 
 impl<'db, S> Merk<S>
@@ -216,6 +216,35 @@ where
 
                     let mut walker = RefWalker::new(tree, self.source());
                     walker.create_positional_proof(position, grove_version)
+                })
+        })
+    }
+
+    /// Compute the list-mode root hash in the same normalized form used by positional proofs.
+    #[cfg(feature = "list_mode")]
+    pub fn positional_root_hash(
+        &self,
+        _grove_version: &GroveVersion,
+    ) -> CostResult<CryptoHash, Error> {
+        self.use_tree_mut(|maybe_tree| {
+            maybe_tree
+                .ok_or(Error::CorruptedCodeExecution(
+                    "Expected tree to exist for positional root hash",
+                ))
+                .wrap_with_cost(Default::default())
+                .flat_map_ok(|tree| {
+                    #[cfg(feature = "list_mode")]
+                    if !tree.list_mode {
+                        return Err(Error::InvalidInputError(
+                            "positional_root_hash can only be called on list-mode trees",
+                        ))
+                        .wrap_with_cost(Default::default());
+                    }
+
+                    let walker = RefWalker::new(tree, self.source());
+                    let mut cost = OperationCost::default();
+                    let hash = walker.hash_without_parent_key().unwrap_add_cost(&mut cost);
+                    Ok(hash).wrap_with_cost(cost)
                 })
         })
     }

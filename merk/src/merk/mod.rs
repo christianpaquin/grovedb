@@ -942,39 +942,6 @@ where
         self.key_cache.borrow_mut().clear();
     }
 
-    /// Ensure that a reopened list tree has all children materialized so positional
-    /// traversals can rely on loaded links.
-    #[cfg(all(feature = "full", feature = "list_mode"))]
-    pub fn ensure_list_tree_materialized(
-        &mut self,
-        grove_version: &GroveVersion,
-    ) -> CostResult<(), Error> {
-        let mut cost = OperationCost::default();
-
-        if self.tree_type != TreeType::ListTree {
-            return Ok(()).wrap_with_cost(cost);
-        }
-
-        let mut maybe_tree = self.tree.take();
-        if let Some(mut tree) = maybe_tree.take() {
-            let result_with_cost =
-                load_tree_recursively(&mut tree, &self.storage, grove_version);
-            let result = result_with_cost.unwrap_add_cost(&mut cost);
-            match result {
-                Ok(()) => {
-                    maybe_tree = Some(tree);
-                }
-                Err(e) => {
-                    self.tree.set(Some(tree));
-                    return Err(e).wrap_with_cost(cost);
-                }
-            }
-        }
-        self.tree.set(maybe_tree);
-
-        Ok(()).wrap_with_cost(cost)
-    }
-
     /// Determine the position for `key` using the in-memory tree metadata.
     /// Returns `None` when the key is absent or no tree is loaded.
     pub fn get_key_position(&self, key: &[u8]) -> Option<u64> {
@@ -995,28 +962,27 @@ where
     /// subtree_size metadata can be queried without triggering missing-child
     /// errors during positional traversals.
     pub fn ensure_list_tree_materialized(
-        &self,
+        &mut self,
         grove_version: &GroveVersion,
     ) -> CostResult<(), Error> {
         let mut cost = OperationCost::default();
 
         let maybe_tree = self.tree.take();
-        if let Some(tree) = maybe_tree {
+        if let Some(mut tree) = maybe_tree {
             let needs_full_load =
                 tree.link(true).map_or(false, |l| l.is_reference()) ||
                 tree.link(false).map_or(false, |l| l.is_reference());
 
             if needs_full_load {
-                let loaded = match load_tree_recursively(tree, &self.storage, grove_version)
-                    .unwrap_add_cost(&mut cost)
-                {
-                    Ok(tree) => tree,
-                    Err(e) => return Err(e).wrap_with_cost(cost),
-                };
-                self.tree.set(Some(loaded));
-            } else {
-                self.tree.set(Some(tree));
+                let result = load_tree_recursively(&mut tree, &self.storage, grove_version)
+                    .unwrap_add_cost(&mut cost);
+                if let Err(e) = result {
+                    self.tree.set(Some(tree));
+                    return Err(e).wrap_with_cost(cost);
+                }
             }
+
+            self.tree.set(Some(tree));
 
             return Ok(()).wrap_with_cost(cost);
         }
@@ -1045,14 +1011,14 @@ where
                 )
             );
 
-            if let Some(root) = root_tree {
-                let loaded = match load_tree_recursively(root, &self.storage, grove_version)
-                    .unwrap_add_cost(&mut cost)
-                {
-                    Ok(tree) => tree,
-                    Err(e) => return Err(e).wrap_with_cost(cost),
-                };
-                self.tree.set(Some(loaded));
+            if let Some(mut root) = root_tree {
+                let result = load_tree_recursively(&mut root, &self.storage, grove_version)
+                    .unwrap_add_cost(&mut cost);
+                if let Err(e) = result {
+                    self.tree.set(Some(root));
+                    return Err(e).wrap_with_cost(cost);
+                }
+                self.tree.set(Some(root));
             } else {
                 self.tree.set(None);
             }

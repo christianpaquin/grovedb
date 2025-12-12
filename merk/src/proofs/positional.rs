@@ -93,7 +93,7 @@ where
 
     /// Helper to call the recursive hash computation
     #[cfg(feature = "list_mode")]
-    fn hash_without_parent_key(&self) -> CostContext<CryptoHash> {
+    pub(crate) fn hash_without_parent_key(&self) -> CostContext<CryptoHash> {
         Self::compute_hash_without_parent_key_recursive(self.tree())
     }
 

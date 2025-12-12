@@ -598,7 +598,22 @@ where
 
     let tree = stack.pop().unwrap();
 
-    let skip_avl_check = matches!(&tree.node, Node::HashWithSubtreeSize(_, _, Some(_)));
+    #[cfg(feature = "list_mode")]
+    let is_list_mode_node = matches!(
+        &tree.node,
+        Node::KVWithSubtreeSize(..)
+            | Node::KVValueHashWithSubtreeSize(..)
+            | Node::KVValueHashFeatureTypeWithSubtreeSize(..)
+            | Node::KVRefValueHashWithSubtreeSize(..)
+            | Node::KVHashWithSubtreeSize(..)
+            | Node::KVDigestWithSubtreeSize(..)
+            | Node::HashWithSubtreeSize(_, _, _)
+    );
+    #[cfg(not(feature = "list_mode"))]
+    let is_list_mode_node = false;
+
+    let skip_avl_check = matches!(&tree.node, Node::HashWithSubtreeSize(_, _, Some(_)))
+        || is_list_mode_node;
 
     if !skip_avl_check
         && tree.child_heights.0.max(tree.child_heights.1)

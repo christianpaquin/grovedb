@@ -444,7 +444,7 @@ impl GroveDb {
         path: SubtreePath<'b, B>,
         merk: Merk<PrefixedRocksDbTransactionContext<'db>>,
         tx: &'db Transaction,
-        mut storage_batch: StorageBatch,
+        storage_batch: StorageBatch,
         grove_version: &GroveVersion,
     ) -> CostResult<(), Error>
     where
